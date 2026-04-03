@@ -5,7 +5,9 @@ import UniformTypeIdentifiers
 struct MainWindowView: View {
     @State private var scanner = FileScanner()
     @State private var selectedIndex: Int? = nil
+    @State private var markedFiles: Set<UUID> = []
     @State private var showDeleteConfirm = false
+    @State private var showBatchDeleteConfirm = false
     @State private var deleteTargetIndex: Int? = nil
     @State private var alertMessage: String? = nil
     @State private var showAlert = false
@@ -55,6 +57,16 @@ struct MainWindowView: View {
                 let file = scanner.files[index]
                 Text("Delete \"\(file.name)\" (\(file.formattedSize))?\n\nThis cannot be undone.")
             }
+        }
+        .alert("Batch Delete", isPresented: $showBatchDeleteConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete All", role: .destructive) {
+                performBatchDelete()
+            }
+        } message: {
+            let count = markedFiles.count
+            let totalSize = markedTotalSize()
+            Text("Delete \(count) selected files (\(formattedBytes(totalSize)))?\n\nThis cannot be undone.")
         }
         .alert("Result", isPresented: $showAlert) {
             Button("OK") { alertMessage = nil }
@@ -106,6 +118,29 @@ struct MainWindowView: View {
             }
 
             Spacer()
+
+            // Batch delete button (visible when files are marked)
+            if !markedFiles.isEmpty {
+                Button {
+                    showBatchDeleteConfirm = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 10))
+                        Text("Delete \(markedFiles.count)")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.red.opacity(0.8))
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Delete \(markedFiles.count) selected files")
+            }
 
             // Toolbar buttons
             if scanner.rootPath != nil {
@@ -292,7 +327,23 @@ struct MainWindowView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.4))
             }
+
             Spacer()
+
+            if !markedFiles.isEmpty {
+                Text("\(markedFiles.count) selected (\(formattedBytes(markedTotalSize())))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange.opacity(0.8))
+
+                Button {
+                    markedFiles.removeAll()
+                } label: {
+                    Text("Clear")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.4))
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
@@ -313,9 +364,18 @@ struct MainWindowView: View {
 
     private func fileRow(file: FileEntry, index: Int) -> some View {
         let isSelected = index == selectedIndex
+        let isMarked = markedFiles.contains(file.id)
         let color = Self.rowColors[index % Self.rowColors.count]
 
         return HStack(spacing: 8) {
+            // Selection checkbox
+            Image(systemName: isMarked ? "checkmark.square.fill" : "square")
+                .font(.system(size: 11))
+                .foregroundStyle(isMarked ? .orange : .white.opacity(0.2))
+                .onTapGesture {
+                    toggleMark(file.id)
+                }
+
             // Color bar
             RoundedRectangle(cornerRadius: 2)
                 .fill(color)
@@ -374,14 +434,23 @@ struct MainWindowView: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.orange.opacity(0.35) : Color.white.opacity(0.03))
+                .fill(isMarked ? Color.orange.opacity(0.15) : (isSelected ? Color.orange.opacity(0.35) : Color.white.opacity(0.03)))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(isSelected ? Color.orange.opacity(0.6) : Color.clear, lineWidth: 1)
+                .strokeBorder(isMarked ? Color.orange.opacity(0.5) : (isSelected ? Color.orange.opacity(0.6) : Color.clear), lineWidth: 1)
         )
-        .onTapGesture { selectedIndex = index }
+        .onTapGesture {
+            if NSEvent.modifierFlags.contains(.command) {
+                toggleMark(file.id)
+            } else {
+                selectedIndex = index
+            }
+        }
         .contextMenu {
+            Button(isMarked ? "Deselect" : "Select for Batch Delete") {
+                toggleMark(file.id)
+            }
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([file.path])
             }
@@ -390,6 +459,11 @@ struct MainWindowView: View {
                 NSPasteboard.general.setString(file.path.path, forType: .string)
             }
             Divider()
+            if !markedFiles.isEmpty {
+                Button("Delete \(markedFiles.count) Selected Files", role: .destructive) {
+                    showBatchDeleteConfirm = true
+                }
+            }
             Button("Delete", role: .destructive) { confirmDelete(at: index) }
         }
     }
@@ -426,6 +500,12 @@ struct MainWindowView: View {
                 .foregroundStyle(.red.opacity(0.6))
             }
 
+            if !markedFiles.isEmpty {
+                Text("\(markedFiles.count) marked (\(formattedBytes(markedTotalSize())))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange.opacity(0.6))
+            }
+
             if let idx = selectedIndex, idx < scanner.files.count {
                 Text("Selected: \(scanner.files[idx].name) (\(scanner.files[idx].formattedSize))")
                     .font(.system(size: 10))
@@ -433,7 +513,7 @@ struct MainWindowView: View {
                     .lineLimit(1)
             }
 
-            Text("↑↓ navigate  ⌫ delete  ⌘O open folder")
+            Text("↑↓ nav  ⌘+click select  ⌫ delete")
                 .font(.system(size: 9))
                 .foregroundStyle(.white.opacity(0.15))
         }
@@ -448,7 +528,9 @@ struct MainWindowView: View {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             // Don't handle keys when a dialog/alert is showing
-            if showDeleteConfirm || showAlert { return event }
+            if showDeleteConfirm || showBatchDeleteConfirm || showAlert { return event }
+
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
             switch event.keyCode {
             case 125, 38: // down arrow, j
@@ -467,6 +549,14 @@ struct MainWindowView: View {
                 handleDeleteKey(); return nil
             case 36: // return
                 handleRevealKey(); return nil
+            case 49: // space
+                handleSpaceKey(); return nil
+            case 0: // a
+                if modifiers.contains(.command) {
+                    // Cmd+A = select all
+                    selectAll(); return nil
+                }
+                return event
             default:
                 return event
             }
@@ -484,7 +574,10 @@ struct MainWindowView: View {
     }
 
     private func handleDeleteKey() {
-        if let idx = selectedIndex, idx < scanner.files.count {
+        if !markedFiles.isEmpty {
+            // If files are marked, do batch delete
+            showBatchDeleteConfirm = true
+        } else if let idx = selectedIndex, idx < scanner.files.count {
             confirmDelete(at: idx)
         }
     }
@@ -495,8 +588,36 @@ struct MainWindowView: View {
         }
     }
 
-    private func handleTabKey() {
-        // Could toggle views in the future
+    private func handleSpaceKey() {
+        guard let idx = selectedIndex, idx < scanner.files.count else { return }
+        let fileId = scanner.files[idx].id
+        toggleMark(fileId)
+        // Auto-advance
+        if idx < scanner.files.count - 1 {
+            selectedIndex = idx + 1
+        }
+    }
+
+    private func selectAll() {
+        for file in scanner.files {
+            markedFiles.insert(file.id)
+        }
+    }
+
+    // MARK: - Multi-select
+
+    private func toggleMark(_ id: UUID) {
+        if markedFiles.contains(id) {
+            markedFiles.remove(id)
+        } else {
+            markedFiles.insert(id)
+        }
+    }
+
+    private func markedTotalSize() -> UInt64 {
+        scanner.files
+            .filter { markedFiles.contains($0.id) }
+            .reduce(0) { $0 + $1.size }
     }
 
     // MARK: - Actions
@@ -515,6 +636,7 @@ struct MainWindowView: View {
 
     private func startScan(url: URL) {
         selectedIndex = nil
+        markedFiles.removeAll()
         scanner.startScan(path: url, minSize: 0, topN: 500)
     }
 
@@ -534,10 +656,40 @@ struct MainWindowView: View {
             alertMessage = result.message
             showAlert = true
         }
+        // Clean up the mark if it was marked
+        if index < scanner.files.count + 1 {
+            // File was removed, marks are by UUID so they'll naturally become stale
+        }
         if let sel = selectedIndex, sel >= scanner.files.count, !scanner.files.isEmpty {
             selectedIndex = scanner.files.count - 1
         }
         deleteTargetIndex = nil
+    }
+
+    private func performBatchDelete() {
+        let indices = scanner.files.enumerated()
+            .filter { markedFiles.contains($0.element.id) }
+            .map { $0.offset }
+
+        guard !indices.isEmpty else { return }
+
+        let result = scanner.deleteFiles(at: indices)
+
+        // Clear marks
+        markedFiles.removeAll()
+
+        if result.failCount > 0 {
+            alertMessage = "Deleted \(result.successCount) files (\(formattedBytes(result.totalFreed)) freed), \(result.failCount) failed"
+            if let error = result.firstError {
+                alertMessage! += " — \(error)"
+            }
+            showAlert = true
+        }
+
+        // Adjust selected index
+        if let sel = selectedIndex, sel >= scanner.files.count, !scanner.files.isEmpty {
+            selectedIndex = scanner.files.count - 1
+        }
     }
 
     private func handleDrop(providers: [NSItemProvider]) {

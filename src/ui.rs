@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     DefaultTerminal, Frame,
 };
+use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -34,7 +35,9 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 enum Dialog {
     None,
     ConfirmDelete,
+    ConfirmBatchDelete,
     DeleteResult(String),
+    BatchDeleteResult(String),
     FileInfo,
 }
 
@@ -54,6 +57,8 @@ pub struct App {
     scan_total_bytes: u64,
     spinner_tick: usize,
     top_n: usize,
+    // Multi-select state
+    marked: HashSet<usize>,
 }
 
 impl App {
@@ -81,6 +86,7 @@ impl App {
             scan_total_bytes: 0,
             spinner_tick: 0,
             top_n,
+            marked: HashSet::new(),
         }
     }
 
@@ -101,6 +107,7 @@ impl App {
             scan_total_bytes: 0,
             spinner_tick: 0,
             top_n: 0,
+            marked: HashSet::new(),
         }
     }
 
@@ -171,7 +178,17 @@ impl App {
                                 self.dialog = Dialog::None;
                             }
                         },
-                        Dialog::DeleteResult(_) | Dialog::FileInfo => {
+                        Dialog::ConfirmBatchDelete => match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                self.delete_marked();
+                            }
+                            _ => {
+                                self.dialog = Dialog::None;
+                            }
+                        },
+                        Dialog::DeleteResult(_)
+                        | Dialog::BatchDeleteResult(_)
+                        | Dialog::FileInfo => {
                             self.dialog = Dialog::None;
                         }
                         Dialog::None => match key.code {
@@ -210,10 +227,36 @@ impl App {
                                     self.dialog = Dialog::FileInfo;
                                 }
                             }
-                            KeyCode::Char('d') | KeyCode::Delete => {
-                                if !self.scan.files.is_empty() {
+                            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                                if !self.marked.is_empty() {
+                                    // Batch delete if files are marked
+                                    self.dialog = Dialog::ConfirmBatchDelete;
+                                } else if !self.scan.files.is_empty() {
+                                    // Single delete otherwise
                                     self.dialog = Dialog::ConfirmDelete;
                                 }
+                            }
+                            KeyCode::Char(' ') => {
+                                // Toggle mark on current file
+                                if !self.scan.files.is_empty() {
+                                    if self.marked.contains(&self.selected) {
+                                        self.marked.remove(&self.selected);
+                                    } else {
+                                        self.marked.insert(self.selected);
+                                    }
+                                    // Auto-advance to next file after toggling
+                                    if self.selected < self.scan.files.len() - 1 {
+                                        self.selected += 1;
+                                    }
+                                }
+                            }
+                            KeyCode::Char('a') => {
+                                // Select all files
+                                self.marked = (0..self.scan.files.len()).collect();
+                            }
+                            KeyCode::Char('A') => {
+                                // Deselect all
+                                self.marked.clear();
                             }
                             KeyCode::Right | KeyCode::Char('l') => {
                                 self.horizontal_scroll += 4;
@@ -249,7 +292,11 @@ impl App {
                 self.deleted_bytes += size;
                 self.deleted_count += 1;
                 self.scan.total_size = self.scan.total_size.saturating_sub(size);
+                self.marked.remove(&self.selected);
                 self.scan.files.remove(self.selected);
+
+                // Rebuild marked set with shifted indices
+                self.rebuild_marked_after_removal(&[self.selected]);
 
                 if !self.scan.files.is_empty() && self.selected >= self.scan.files.len() {
                     self.selected = self.scan.files.len() - 1;
@@ -269,6 +316,110 @@ impl App {
                 ));
             }
         }
+    }
+
+    fn delete_marked(&mut self) {
+        if self.marked.is_empty() {
+            return;
+        }
+
+        // Collect indices to delete, sorted descending so removal doesn't shift
+        let mut indices: Vec<usize> = self.marked.iter().copied().collect();
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+
+        let mut success_count = 0usize;
+        let mut fail_count = 0usize;
+        let mut total_freed: u64 = 0;
+        let mut first_error: Option<String> = None;
+
+        for idx in &indices {
+            let file = &self.scan.files[*idx];
+            let path = file.path.clone();
+            let size = file.size;
+
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    total_freed += size;
+                    success_count += 1;
+                }
+                Err(e) => {
+                    fail_count += 1;
+                    if first_error.is_none() {
+                        first_error = Some(format!(
+                            "Error deleting {}: {}",
+                            path.file_name().unwrap_or_default().to_string_lossy(),
+                            e
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Remove successfully deleted files (indices are still sorted descending)
+        let mut removed = Vec::new();
+        for (_i, idx) in indices.iter().enumerate() {
+            let file = &self.scan.files[*idx];
+            let path = file.path.clone();
+            // Only remove if the file was successfully deleted
+            if !path.exists() {
+                self.scan.total_size = self.scan.total_size.saturating_sub(file.size);
+                removed.push(*idx);
+            }
+        }
+
+        // Remove in descending order
+        for idx in removed.iter().rev() {
+            if *idx < self.scan.files.len() {
+                self.scan.files.remove(*idx);
+            }
+        }
+
+        self.deleted_bytes += total_freed;
+        self.deleted_count += success_count;
+        self.marked.clear();
+
+        if !self.scan.files.is_empty() && self.selected >= self.scan.files.len() {
+            self.selected = self.scan.files.len() - 1;
+        }
+
+        let msg = if fail_count > 0 {
+            format!(
+                "Deleted {} files (freed {}), {} failed{}",
+                success_count,
+                ByteSize(total_freed),
+                fail_count,
+                first_error.map(|e| format!(" — {}", e)).unwrap_or_default()
+            )
+        } else {
+            format!(
+                "Deleted {} files (freed {})",
+                success_count,
+                ByteSize(total_freed)
+            )
+        };
+
+        self.dialog = Dialog::BatchDeleteResult(msg);
+    }
+
+    /// After removing a file at a given index, shift all marks > index down by 1
+    fn rebuild_marked_after_removal(&mut self, removed_indices: &[usize]) {
+        let mut new_marked = HashSet::new();
+        for &idx in &self.marked {
+            let shift = removed_indices.iter().filter(|&&r| r < idx).count();
+            let new_idx = idx - shift;
+            if !removed_indices.contains(&idx) && new_idx < self.scan.files.len() {
+                new_marked.insert(new_idx);
+            }
+        }
+        self.marked = new_marked;
+    }
+
+    /// Calculate total size of all marked files
+    fn marked_total_size(&self) -> u64 {
+        self.marked
+            .iter()
+            .map(|&i| self.scan.files.get(i).map(|f| f.size).unwrap_or(0))
+            .sum()
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -301,7 +452,9 @@ impl App {
         // Draw dialog on top
         match &self.dialog {
             Dialog::ConfirmDelete => self.draw_confirm_dialog(frame, size),
+            Dialog::ConfirmBatchDelete => self.draw_batch_confirm_dialog(frame, size),
             Dialog::DeleteResult(msg) => self.draw_result_dialog(frame, size, msg.clone()),
+            Dialog::BatchDeleteResult(msg) => self.draw_result_dialog(frame, size, msg.clone()),
             Dialog::FileInfo => self.draw_file_info_dialog(frame, size),
             Dialog::None => {}
         }
@@ -372,6 +525,66 @@ impl App {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Red))
             .title(" Delete File ");
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, dialog_area);
+    }
+
+    fn draw_batch_confirm_dialog(&self, frame: &mut Frame, area: Rect) {
+        if self.marked.is_empty() {
+            return;
+        }
+
+        let count = self.marked.len();
+        let total_size = self.marked_total_size();
+
+        let dialog_width = 60.min(area.width.saturating_sub(4));
+        let dialog_height = 8_u16;
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+        let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
+
+        frame.render_widget(Clear, dialog_area);
+
+        let text = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  Delete "),
+                Span::styled(
+                    format!("{} files", count),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" ({})", ByteSize(total_size)),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw(" ?"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  This will permanently remove {} files", count),
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  Press "),
+                Span::styled(
+                    "y",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" to confirm, any other key to cancel"),
+            ]),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title(" Batch Delete ");
         let paragraph = Paragraph::new(text)
             .block(block)
             .wrap(Wrap { trim: false });
@@ -512,11 +725,17 @@ impl App {
 
             let color = COLORS[rect.index % COLORS.len()];
             let is_selected = rect.index == self.selected;
+            let is_marked = self.marked.contains(&rect.index);
 
             let style = if is_selected {
                 Style::default()
                     .bg(Color::White)
                     .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_marked {
+                Style::default()
+                    .bg(Color::Magenta)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().bg(color).fg(Color::Black)
@@ -597,16 +816,36 @@ impl App {
             let path_str = format!("{}{}", parent_hint, name);
 
             let color = COLORS[i % COLORS.len()];
-            let style = if i == self.selected {
-                Style::default()
-                    .bg(Color::White)
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
+            let is_marked = self.marked.contains(&i);
+
+            let (marker, style) = if i == self.selected && is_marked {
+                (
+                    "◆",
+                    Style::default()
+                        .bg(Color::White)
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if i == self.selected {
+                (
+                    " ",
+                    Style::default()
+                        .bg(Color::White)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if is_marked {
+                (
+                    "◆",
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
-                Style::default().fg(color)
+                (" ", Style::default().fg(color))
             };
 
-            let full_line = format!("{}  {}", size_str, path_str);
+            let full_line = format!("{} {} {}", marker, size_str, path_str);
             let display_str = if self.horizontal_scroll < full_line.len() {
                 &full_line[self.horizontal_scroll..]
             } else {
@@ -648,6 +887,16 @@ impl App {
             String::new()
         };
 
+        let marked_info = if !self.marked.is_empty() {
+            format!(
+                "│ Marked: {} ({}) ",
+                self.marked.len(),
+                ByteSize(self.marked_total_size())
+            )
+        } else {
+            String::new()
+        };
+
         let freed_info = if self.deleted_count > 0 {
             format!(
                 "│ Freed: {} ({} files) ",
@@ -659,8 +908,8 @@ impl App {
         };
 
         let status = format!(
-            "{}{}{}│ ↑↓ navigate  ←→ scroll  Enter info  d delete  Tab treemap  q quit",
-            scan_info, selected_info, freed_info,
+            "{}{}{}{}│ Space mark  D batch-del  d delete  ↑↓ nav  Tab treemap  q quit",
+            scan_info, selected_info, marked_info, freed_info,
         );
 
         let block = Block::default().borders(Borders::ALL);

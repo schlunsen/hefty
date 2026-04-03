@@ -64,6 +64,47 @@ final class FileScanner {
         }
     }
 
+    /// Delete multiple files at the given indices. Returns summary.
+    func deleteFiles(at indices: [Int]) -> (successCount: Int, failCount: Int, totalFreed: UInt64, firstError: String?) {
+        // Sort descending so removal doesn't shift indices
+        let sortedIndices = indices.sorted(by: >)
+
+        var successCount = 0
+        var failCount = 0
+        var totalFreed: UInt64 = 0
+        var firstError: String? = nil
+        var removedIndices: [Int] = []
+
+        for index in sortedIndices {
+            guard index >= 0 && index < files.count else { continue }
+
+            let file = files[index]
+            do {
+                try FileManager.default.removeItem(at: file.path)
+                deletedBytes += file.size
+                deletedCount += 1
+                totalSize = totalSize >= file.size ? totalSize - file.size : 0
+                totalFreed += file.size
+                removedIndices.append(index)
+                successCount += 1
+            } catch {
+                failCount += 1
+                if firstError == nil {
+                    firstError = "Error deleting \(file.name): \(error.localizedDescription)"
+                }
+            }
+        }
+
+        // Remove successfully deleted files (already sorted descending)
+        for index in removedIndices {
+            if index < files.count {
+                files.remove(at: index)
+            }
+        }
+
+        return (successCount, failCount, totalFreed, firstError)
+    }
+
     private func performScan(path: URL, minSize: UInt64) async {
         let fileManager = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
