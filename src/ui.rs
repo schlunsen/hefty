@@ -35,12 +35,14 @@ enum Dialog {
     None,
     ConfirmDelete,
     DeleteResult(String),
+    FileInfo,
 }
 
 pub struct App {
     scan: ScanResult,
     selected: usize,
     scroll_offset: usize,
+    horizontal_scroll: usize,
     show_treemap: bool,
     dialog: Dialog,
     deleted_bytes: u64,
@@ -68,6 +70,7 @@ impl App {
             },
             selected: 0,
             scroll_offset: 0,
+            horizontal_scroll: 0,
             show_treemap: true,
             dialog: Dialog::None,
             deleted_bytes: 0,
@@ -87,6 +90,7 @@ impl App {
             scan,
             selected: 0,
             scroll_offset: 0,
+            horizontal_scroll: 0,
             show_treemap: true,
             dialog: Dialog::None,
             deleted_bytes: 0,
@@ -167,7 +171,7 @@ impl App {
                                 self.dialog = Dialog::None;
                             }
                         },
-                        Dialog::DeleteResult(_) => {
+                        Dialog::DeleteResult(_) | Dialog::FileInfo => {
                             self.dialog = Dialog::None;
                         }
                         Dialog::None => match key.code {
@@ -201,10 +205,21 @@ impl App {
                             KeyCode::Tab => {
                                 self.show_treemap = !self.show_treemap;
                             }
+                            KeyCode::Enter => {
+                                if !self.scan.files.is_empty() {
+                                    self.dialog = Dialog::FileInfo;
+                                }
+                            }
                             KeyCode::Char('d') | KeyCode::Delete => {
                                 if !self.scan.files.is_empty() {
                                     self.dialog = Dialog::ConfirmDelete;
                                 }
+                            }
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                self.horizontal_scroll += 4;
+                            }
+                            KeyCode::Left | KeyCode::Char('h') => {
+                                self.horizontal_scroll = self.horizontal_scroll.saturating_sub(4);
                             }
                             _ => {}
                         },
@@ -287,6 +302,7 @@ impl App {
         match &self.dialog {
             Dialog::ConfirmDelete => self.draw_confirm_dialog(frame, size),
             Dialog::DeleteResult(msg) => self.draw_result_dialog(frame, size, msg.clone()),
+            Dialog::FileInfo => self.draw_file_info_dialog(frame, size),
             Dialog::None => {}
         }
     }
@@ -396,6 +412,75 @@ impl App {
         frame.render_widget(paragraph, dialog_area);
     }
 
+    fn draw_file_info_dialog(&self, frame: &mut Frame, area: Rect) {
+        if self.scan.files.is_empty() {
+            return;
+        }
+
+        let file = &self.scan.files[self.selected];
+        let full_path = file.path.display().to_string();
+        let rel_path = file
+            .path
+            .strip_prefix(&self.scan.root)
+            .unwrap_or(&file.path)
+            .display()
+            .to_string();
+        let name = file
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let size_str = format!("{}", ByteSize(file.size));
+
+        let dialog_width = (full_path.len() as u16 + 6).max(50).min(area.width.saturating_sub(4));
+        let dialog_height = 9_u16;
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+        let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
+
+        frame.render_widget(Clear, dialog_area);
+
+        let text = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Name: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    &name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  Size: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(&size_str, Style::default().fg(Color::Yellow)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Path: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(&rel_path, Style::default().fg(Color::Cyan)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Full: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(&full_path, Style::default().fg(Color::White)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press any key to close",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(" File Info ");
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, dialog_area);
+    }
+
     fn draw_treemap(&self, frame: &mut Frame, area: Rect) {
         let title = if self.scanning {
             let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
@@ -497,12 +582,19 @@ impl App {
             .take(visible_rows)
         {
             let size_str = format!("{:>10}", ByteSize(file.size));
-            let path_str = file
+            let name = file
                 .path
-                .strip_prefix(&self.scan.root)
-                .unwrap_or(&file.path)
-                .display()
-                .to_string();
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            // Show parent dir for context (e.g. "models/big-file.onnx")
+            let parent_hint = file
+                .path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|p| format!("{}/", p.to_string_lossy()))
+                .unwrap_or_default();
+            let path_str = format!("{}{}", parent_hint, name);
 
             let color = COLORS[i % COLORS.len()];
             let style = if i == self.selected {
@@ -514,11 +606,14 @@ impl App {
                 Style::default().fg(color)
             };
 
-            lines.push(Line::from(vec![
-                Span::styled(size_str, style.add_modifier(Modifier::BOLD)),
-                Span::styled("  ", style),
-                Span::styled(path_str, style),
-            ]));
+            let full_line = format!("{}  {}", size_str, path_str);
+            let display_str = if self.horizontal_scroll < full_line.len() {
+                &full_line[self.horizontal_scroll..]
+            } else {
+                ""
+            };
+
+            lines.push(Line::from(Span::styled(display_str.to_string(), style)));
         }
 
         let paragraph = Paragraph::new(lines);
@@ -564,7 +659,7 @@ impl App {
         };
 
         let status = format!(
-            "{}{}{}│ ↑↓ navigate  d delete  Tab treemap  q quit",
+            "{}{}{}│ ↑↓ navigate  ←→ scroll  Enter info  d delete  Tab treemap  q quit",
             scan_info, selected_info, freed_info,
         );
 
