@@ -1,13 +1,15 @@
 # hefty
 
-<!-- TODO: Add banner image once HF_API_KEY is configured -->
-<!-- ![hefty banner](banner.png) -->
+A fast disk usage analyzer inspired by [GrandPerspective](https://grandperspectiv.sourceforge.net/) — available as both a **CLI tool** and a **native macOS app**. Find the hefty files hogging your disk space.
 
-A fast CLI disk usage analyzer inspired by [GrandPerspective](https://grandperspectiv.sourceforge.net/) for macOS. Find the hefty files hogging your disk space.
+![Hefty Mac App](screenshots/mac-app.png)
+
+![Hefty CLI TUI](screenshots/cli-tui.png)
 
 ## Features
 
-- **Fast scanning** — recursively walks directories using `walkdir`
+- **Native macOS app** — beautiful GUI with drag-and-drop folder scanning
+- **Fast CLI tool** — recursively walks directories using `walkdir`
 - **Interactive TUI** — treemap visualization + scrollable file list powered by `ratatui`
 - **List mode** — non-interactive output for scripting and quick checks
 - **Configurable** — filter by minimum file size, limit number of results

@@ -1,2 +1,6 @@
 target/
-mac_app/
+.DS_Store
+
+# Xcode user-specific data
+mac_app/**/xcuserdata/
+mac_app/**/UserInterfaceState.xcuserstate
