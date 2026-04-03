@@ -1,5 +1,8 @@
 use anyhow::Result;
+use bytesize::ByteSize;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -18,6 +21,9 @@ pub struct ScanResult {
 pub fn scan_directory(path: &Path, min_size: u64) -> Result<ScanResult> {
     let mut files = Vec::new();
     let mut total_size: u64 = 0;
+    let mut file_count: u64 = 0;
+    let mut last_update = Instant::now();
+    let stderr = std::io::stderr();
 
     for entry in WalkDir::new(path)
         .follow_links(false)
@@ -28,15 +34,34 @@ pub fn scan_directory(path: &Path, min_size: u64) -> Result<ScanResult> {
             if let Ok(metadata) = entry.metadata() {
                 let size = metadata.len();
                 total_size = total_size.saturating_add(size);
+                file_count += 1;
                 if size >= min_size {
                     files.push(FileEntry {
                         path: entry.into_path(),
                         size,
                     });
                 }
+
+                // Update progress every 100ms
+                if last_update.elapsed().as_millis() >= 100 {
+                    let mut handle = stderr.lock();
+                    let _ = write!(
+                        handle,
+                        "\r\x1b[K  Scanned {} files ({}) — {} large files found...",
+                        file_count,
+                        ByteSize(total_size),
+                        files.len()
+                    );
+                    let _ = handle.flush();
+                    last_update = Instant::now();
+                }
             }
         }
     }
+
+    // Clear the progress line
+    let _ = write!(std::io::stderr(), "\r\x1b[K");
+    let _ = std::io::stderr().flush();
 
     // Sort largest first
     files.sort_by(|a, b| b.size.cmp(&a.size));
