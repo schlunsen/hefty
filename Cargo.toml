@@ -1,6 +1,6 @@
 [package]
 name = "hefty"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A fast CLI disk usage analyzer — find the hefty files hogging your disk space"
 license = "MIT"
