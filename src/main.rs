@@ -82,7 +82,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        println!("\n{:>12}  {}", "SIZE", "PATH");
+        println!("\n{:>12}  PATH", "SIZE");
         println!("{}", "─".repeat(80));
         for file in &scan.files {
             let rel = file.path.strip_prefix(&scan.root).unwrap_or(&file.path);

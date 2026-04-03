@@ -6,6 +6,7 @@ pub struct TreemapRect {
     pub w: f64,
     pub h: f64,
     pub index: usize,
+    #[allow(dead_code)]
     pub size: u64,
 }
 

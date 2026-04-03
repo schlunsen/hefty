@@ -27,6 +27,7 @@ pub enum ScanMessage {
     /// Scan is complete
     Done,
     /// Scan encountered a fatal error
+    #[allow(dead_code)]
     Error(String),
 }
 
