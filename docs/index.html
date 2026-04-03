@@ -31,7 +31,6 @@
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     html { scroll-behavior: smooth; }
 
     body {
@@ -44,12 +43,97 @@
 
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
 
-    code, pre {
-      font-family: 'JetBrains Mono', monospace;
+    /* ── Animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideInLeft {
+      from { opacity: 0; transform: translateX(-40px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes slideInRight {
+      from { opacity: 0; transform: translateX(40px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes scaleIn {
+      from { opacity: 0; transform: scale(0.92); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(88, 166, 255, 0.1); }
+      50% { box-shadow: 0 0 40px rgba(88, 166, 255, 0.25); }
+    }
+    @keyframes typeLine {
+      from { width: 0; }
+      to { width: 100%; }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.4; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.05); }
+    }
+    @keyframes floatUp {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
     }
 
-    /* Nav */
+    /* ── Reveal on scroll ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .reveal-left {
+      opacity: 0;
+      transform: translateX(-40px);
+      transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal-left.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    .reveal-right {
+      opacity: 0;
+      transform: translateX(40px);
+      transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal-right.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    .reveal-scale {
+      opacity: 0;
+      transform: scale(0.9);
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal-scale.visible {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* Stagger children */
+    .stagger-children .reveal:nth-child(1) { transition-delay: 0ms; }
+    .stagger-children .reveal:nth-child(2) { transition-delay: 80ms; }
+    .stagger-children .reveal:nth-child(3) { transition-delay: 160ms; }
+    .stagger-children .reveal:nth-child(4) { transition-delay: 240ms; }
+    .stagger-children .reveal:nth-child(5) { transition-delay: 320ms; }
+    .stagger-children .reveal:nth-child(6) { transition-delay: 400ms; }
+
+    /* ── Nav ── */
     nav {
       position: fixed;
       top: 0;
@@ -62,16 +146,12 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      animation: fadeIn 0.8s ease;
     }
 
-    nav .logo {
-      font-weight: 800;
-      font-size: 1.25rem;
-      letter-spacing: -0.02em;
-    }
-
+    nav .logo { font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; }
     nav .links { display: flex; gap: 1.5rem; align-items: center; }
-    nav .links a { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; }
+    nav .links a { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
     nav .links a:hover { color: var(--text); text-decoration: none; }
 
     .gh-btn {
@@ -85,15 +165,20 @@
       border-radius: 6px;
       font-size: 0.85rem;
       font-weight: 500;
-      transition: border-color 0.2s;
+      transition: border-color 0.3s, box-shadow 0.3s;
     }
-    .gh-btn:hover { border-color: var(--accent); text-decoration: none !important; }
+    .gh-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); text-decoration: none !important; }
 
-    /* Hero */
+    /* ── Hero ── */
     .hero {
-      padding: 10rem 2rem 6rem;
+      padding: 8rem 2rem 4rem;
       text-align: center;
       position: relative;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
     }
 
     .hero::before {
@@ -102,20 +187,21 @@
       top: 0;
       left: 50%;
       transform: translateX(-50%);
-      width: 800px;
-      height: 500px;
-      background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(ellipse at 50% 30%, var(--accent-glow) 0%, transparent 60%);
       pointer-events: none;
+      animation: pulseGlow 4s ease-in-out infinite;
     }
 
     .hero h1 {
-      font-size: 4.5rem;
+      font-size: 5rem;
       font-weight: 800;
       letter-spacing: -0.04em;
       line-height: 1.1;
       margin-bottom: 1rem;
+      animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
     }
-
     .hero h1 span { color: var(--accent); }
 
     .hero .tagline {
@@ -124,6 +210,7 @@
       max-width: 560px;
       margin: 0 auto 2.5rem;
       line-height: 1.5;
+      animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.4s both;
     }
 
     .hero-actions {
@@ -131,6 +218,7 @@
       gap: 1rem;
       justify-content: center;
       flex-wrap: wrap;
+      animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
     }
 
     .btn {
@@ -141,36 +229,35 @@
       border-radius: 8px;
       font-weight: 600;
       font-size: 1rem;
-      transition: all 0.2s;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
       border: 1px solid transparent;
     }
 
-    .btn-primary {
-      background: var(--accent);
-      color: var(--bg) !important;
-    }
-    .btn-primary:hover { opacity: 0.9; text-decoration: none !important; transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: var(--bg) !important; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(88, 166, 255, 0.3); text-decoration: none !important; }
+    .btn-secondary { background: var(--bg-card); color: var(--text) !important; border-color: var(--border); }
+    .btn-secondary:hover { border-color: var(--accent); transform: translateY(-2px); text-decoration: none !important; }
 
-    .btn-secondary {
-      background: var(--bg-card);
-      color: var(--text) !important;
-      border-color: var(--border);
-    }
-    .btn-secondary:hover { border-color: var(--accent); text-decoration: none !important; }
-
-    /* Terminal Demo */
+    /* ── Terminal Demo ── */
     .terminal-wrapper {
-      max-width: 900px;
-      margin: 3.5rem auto 0;
+      max-width: 960px;
+      width: 100%;
+      margin: 3rem auto 0;
+      animation: scaleIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both;
     }
 
     .terminal {
       background: var(--bg-code);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
       overflow: hidden;
       text-align: left;
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+      transition: box-shadow 0.4s, transform 0.4s;
+    }
+    .terminal:hover {
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 40px var(--accent-glow);
+      transform: translateY(-2px);
     }
 
     .terminal-header {
@@ -182,11 +269,7 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .terminal-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-    }
+    .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
     .terminal-dot.red { background: #ff5f57; }
     .terminal-dot.yellow { background: #febc2e; }
     .terminal-dot.green { background: #28c840; }
@@ -207,15 +290,19 @@
       overflow-x: auto;
     }
 
-    .terminal-body .prompt { color: var(--green); }
-    .terminal-body .cmd { color: var(--text); }
     .terminal-body .dim { color: var(--text-muted); }
     .terminal-body .size { color: var(--yellow); font-weight: 700; }
     .terminal-body .path { color: var(--text); }
     .terminal-body .total { color: var(--accent); font-weight: 700; }
-    .terminal-body .line { color: var(--border); }
+    .terminal-body .line-sep { color: var(--border); }
 
-    /* Treemap Demo */
+    /* Typing animation for terminal lines */
+    .type-line {
+      opacity: 0;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    /* ── Treemap Demo ── */
     .treemap-demo {
       display: grid;
       grid-template-columns: 1.8fr 1fr 1fr;
@@ -237,7 +324,10 @@
       text-align: center;
       padding: 0.25rem;
       line-height: 1.3;
+      transition: filter 0.3s, transform 0.3s;
+      cursor: default;
     }
+    .treemap-cell:hover { filter: brightness(1.3); transform: scale(1.02); z-index: 1; }
 
     .treemap-cell:nth-child(1) { background: #1f6feb; grid-row: span 2; }
     .treemap-cell:nth-child(2) { background: #238636; }
@@ -245,11 +335,11 @@
     .treemap-cell:nth-child(4) { background: #bf4b28; }
     .treemap-cell:nth-child(5) { background: #9e6a03; }
 
-    /* Sections */
+    /* ── Sections ── */
     section {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 5rem 3rem;
+      max-width: 100%;
+      margin: 0;
+      padding: 4rem 4rem;
     }
 
     .section-label {
@@ -265,17 +355,17 @@
       font-size: 2.5rem;
       font-weight: 800;
       letter-spacing: -0.03em;
-      margin-bottom: 1rem;
+      margin-bottom: 0.75rem;
     }
 
     section .subtitle {
       color: var(--text-muted);
       font-size: 1.1rem;
       max-width: 600px;
-      margin-bottom: 3rem;
+      margin-bottom: 2.5rem;
     }
 
-    /* Feature Grid */
+    /* ── Features Grid ── */
     .features-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -287,9 +377,13 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 1.75rem;
-      transition: border-color 0.2s;
+      transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
     }
-    .feature-card:hover { border-color: var(--accent); }
+    .feature-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+    }
 
     .feature-icon {
       font-size: 1.75rem;
@@ -301,24 +395,24 @@
       text-align: center;
       border-radius: 10px;
       background: var(--accent-glow);
+      transition: transform 0.3s;
     }
+    .feature-card:hover .feature-icon { transform: scale(1.1); }
 
-    .feature-card h3 {
-      font-size: 1.1rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-    }
+    .feature-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .feature-card p { color: var(--text-muted); font-size: 0.92rem; line-height: 1.55; }
 
-    .feature-card p {
-      color: var(--text-muted);
-      font-size: 0.92rem;
-      line-height: 1.55;
-    }
-
-    /* Install */
-    .install-methods {
+    /* ── Install + Usage combined row ── */
+    .install-usage-row {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      padding: 4rem;
+    }
+
+    .install-methods {
+      display: flex;
+      flex-direction: column;
       gap: 1.25rem;
     }
 
@@ -326,13 +420,15 @@
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 1.75rem;
+      padding: 1.5rem;
+      transition: border-color 0.3s, transform 0.3s;
     }
+    .install-card:hover { border-color: var(--accent); transform: translateX(4px); }
 
     .install-card h3 {
       font-size: 1rem;
       font-weight: 700;
-      margin-bottom: 1rem;
+      margin-bottom: 0.75rem;
       display: flex;
       align-items: center;
       gap: 0.5rem;
@@ -352,16 +448,19 @@
       background: var(--bg-code);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 1rem 1.25rem;
+      padding: 0.85rem 1.1rem;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       overflow-x: auto;
       position: relative;
+      transition: border-color 0.3s;
     }
-
+    .code-block:hover { border-color: var(--accent); }
     .code-block code { color: var(--text); }
 
-    /* Keyboard shortcuts */
+    /* ── Usage column ── */
+    .usage-col .code-block { margin-bottom: 1.25rem; }
+
     .shortcuts-table {
       width: 100%;
       border-collapse: collapse;
@@ -373,8 +472,8 @@
 
     .shortcuts-table th {
       text-align: left;
-      padding: 0.85rem 1.25rem;
-      font-size: 0.8rem;
+      padding: 0.7rem 1rem;
+      font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: var(--text-muted);
@@ -383,43 +482,65 @@
     }
 
     .shortcuts-table td {
-      padding: 0.7rem 1.25rem;
+      padding: 0.55rem 1rem;
       border-bottom: 1px solid var(--border);
-      font-size: 0.92rem;
+      font-size: 0.88rem;
     }
-
     .shortcuts-table tr:last-child td { border-bottom: none; }
+    .shortcuts-table tr { transition: background 0.2s; }
+    .shortcuts-table tbody tr:hover { background: rgba(88, 166, 255, 0.05); }
 
     kbd {
       background: var(--bg-code);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 0.15rem 0.5rem;
+      padding: 0.12rem 0.45rem;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
+      font-size: 0.78rem;
       box-shadow: 0 1px 0 var(--border);
     }
 
-    /* Footer */
+    /* ── Scroll indicator ── */
+    .scroll-hint {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      animation: floatUp 2s ease-in-out infinite;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.3rem;
+      opacity: 0;
+      animation: fadeIn 1s ease 1.5s forwards, floatUp 2s ease-in-out 1.5s infinite;
+    }
+    .scroll-hint svg { opacity: 0.5; }
+
+    /* ── Footer ── */
     footer {
       border-top: 1px solid var(--border);
-      padding: 2.5rem 2rem;
+      padding: 2rem 2rem;
       text-align: center;
       color: var(--text-muted);
       font-size: 0.88rem;
     }
-
-    footer a { color: var(--text-muted); }
+    footer a { color: var(--text-muted); transition: color 0.2s; }
     footer a:hover { color: var(--text); }
 
-    /* Responsive */
+    /* ── Responsive ── */
     @media (max-width: 768px) {
       .hero h1 { font-size: 2.75rem; }
       .hero .tagline { font-size: 1.1rem; }
+      section { padding: 3rem 1.5rem; }
       section h2 { font-size: 1.85rem; }
       nav .links a:not(.gh-btn) { display: none; }
+      .features-grid { grid-template-columns: 1fr; }
+      .install-usage-row { grid-template-columns: 1fr; padding: 3rem 1.5rem; }
       .treemap-demo { height: 140px; }
       .treemap-cell { font-size: 0.6rem; }
+      .scroll-hint { display: none; }
     }
   </style>
 </head>
@@ -430,8 +551,8 @@
   <div class="logo">hefty</div>
   <div class="links">
     <a href="#features">Features</a>
-    <a href="#install">Install</a>
-    <a href="#usage">Usage</a>
+    <a href="#get-started">Install</a>
+    <a href="#get-started">Usage</a>
     <a class="gh-btn" href="https://github.com/schlunsen/hefty" target="_blank">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -439,12 +560,12 @@
   </div>
 </nav>
 
-<!-- Hero -->
+<!-- Hero (full viewport) -->
 <section class="hero">
   <h1>Find the <span>hefty</span> files.</h1>
   <p class="tagline">A fast CLI disk usage analyzer with an interactive treemap TUI. Built in Rust, inspired by GrandPerspective.</p>
   <div class="hero-actions">
-    <a href="#install" class="btn btn-primary">Get Started</a>
+    <a href="#get-started" class="btn btn-primary">Get Started</a>
     <a href="https://github.com/schlunsen/hefty" class="btn btn-secondary" target="_blank">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       View Source
@@ -459,7 +580,7 @@
         <span class="terminal-dot green"></span>
         <span class="terminal-title">hefty ~/projects --list -n 8</span>
       </div>
-      <div class="terminal-body">
+      <div class="terminal-body" id="terminal-output">
         <div class="treemap-demo">
           <div class="treemap-cell">index.pkl<br>1.5 GB</div>
           <div class="treemap-cell">clovr<br>724 MB</div>
@@ -467,56 +588,60 @@
           <div class="treemap-cell">lib.a<br>444 MB</div>
           <div class="treemap-cell">app.dmg<br>249 MB</div>
         </div>
-        <span class="dim">        SIZE  PATH</span><br>
-        <span class="line">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span><br>
-        <span class="size">  1.5 GB</span>  <span class="path">legalize-es/.index_cache/es_index.pkl</span><br>
-        <span class="size">724.0 MB</span>  <span class="path">clovr-cat/desktop/clovr</span><br>
-        <span class="size">719.7 MB</span>  <span class="path">clovr-cat/desktop/build/bin/clovr</span><br>
-        <span class="size">652.2 MB</span>  <span class="path">clovr-cat/desktop/frontend/public/models/encoder-model.int8.onnx</span><br>
-        <span class="size">621.9 MB</span>  <span class="path">legalize-dk/.index_cache/dk_index.pkl</span><br>
-        <span class="size">530.7 MB</span>  <span class="path">legalize-de/.index_cache/de_index.pkl</span><br>
-        <span class="size">444.4 MB</span>  <span class="path">src-tauri/target/debug/libwee_desktop_lib.a</span><br>
-        <span class="size">248.6 MB</span>  <span class="path">src-tauri/target/release/bundle/macos/app.dmg</span><br>
-        <span class="line">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span><br>
-        <span class="total"> 39.5 GB  Total scanned</span>
+        <div class="type-line" style="animation-delay: 0.9s"><span class="dim">        SIZE  PATH</span></div>
+        <div class="type-line" style="animation-delay: 1.0s"><span class="line-sep">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span></div>
+        <div class="type-line" style="animation-delay: 1.15s"><span class="size">  1.5 GB</span>  <span class="path">legalize-es/.index_cache/es_index.pkl</span></div>
+        <div class="type-line" style="animation-delay: 1.3s"><span class="size">724.0 MB</span>  <span class="path">clovr-cat/desktop/clovr</span></div>
+        <div class="type-line" style="animation-delay: 1.45s"><span class="size">719.7 MB</span>  <span class="path">clovr-cat/desktop/build/bin/clovr</span></div>
+        <div class="type-line" style="animation-delay: 1.6s"><span class="size">652.2 MB</span>  <span class="path">clovr-cat/desktop/frontend/public/models/encoder-model.int8.onnx</span></div>
+        <div class="type-line" style="animation-delay: 1.75s"><span class="size">621.9 MB</span>  <span class="path">legalize-dk/.index_cache/dk_index.pkl</span></div>
+        <div class="type-line" style="animation-delay: 1.9s"><span class="size">530.7 MB</span>  <span class="path">legalize-de/.index_cache/de_index.pkl</span></div>
+        <div class="type-line" style="animation-delay: 2.05s"><span class="size">444.4 MB</span>  <span class="path">src-tauri/target/debug/libwee_desktop_lib.a</span></div>
+        <div class="type-line" style="animation-delay: 2.2s"><span class="size">248.6 MB</span>  <span class="path">src-tauri/target/release/bundle/macos/app.dmg</span></div>
+        <div class="type-line" style="animation-delay: 2.35s"><span class="line-sep">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span></div>
+        <div class="type-line" style="animation-delay: 2.5s"><span class="total"> 39.5 GB  Total scanned</span></div>
       </div>
     </div>
+  </div>
+
+  <div class="scroll-hint">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
   </div>
 </section>
 
 <!-- Features -->
-<section id="features">
-  <div class="section-label">Features</div>
-  <h2>Why hefty?</h2>
-  <p class="subtitle">A lightning-fast disk space analyzer that lives in your terminal. No GUI needed.</p>
+<section id="features" style="padding-top: 5rem; padding-bottom: 4rem;">
+  <div class="section-label reveal">Features</div>
+  <h2 class="reveal">Why hefty?</h2>
+  <p class="subtitle reveal">A lightning-fast disk space analyzer that lives in your terminal. No GUI needed.</p>
 
-  <div class="features-grid">
-    <div class="feature-card">
+  <div class="features-grid stagger-children">
+    <div class="feature-card reveal">
       <span class="feature-icon">&#9889;</span>
       <h3>Blazingly Fast</h3>
       <p>Built in Rust with efficient recursive directory traversal. Scans thousands of files in seconds.</p>
     </div>
-    <div class="feature-card">
+    <div class="feature-card reveal">
       <span class="feature-icon">&#9635;</span>
       <h3>Interactive Treemap</h3>
       <p>Visualize disk usage with a squarified treemap. See at a glance which files are eating your space.</p>
     </div>
-    <div class="feature-card">
+    <div class="feature-card reveal">
       <span class="feature-icon">&#9776;</span>
       <h3>List Mode</h3>
       <p>Non-interactive output perfect for scripting, piping, and quick checks. Integrates into your workflow.</p>
     </div>
-    <div class="feature-card">
+    <div class="feature-card reveal">
       <span class="feature-icon">&#9881;</span>
       <h3>Configurable</h3>
       <p>Filter by minimum file size, limit results to top N files, and scan any directory you choose.</p>
     </div>
-    <div class="feature-card">
+    <div class="feature-card reveal">
       <span class="feature-icon">&#127912;</span>
       <h3>Beautiful TUI</h3>
       <p>Powered by Ratatui with colored output, vim-style navigation, and a responsive split-pane layout.</p>
     </div>
-    <div class="feature-card">
+    <div class="feature-card reveal">
       <span class="feature-icon">&#128230;</span>
       <h3>Easy to Install</h3>
       <p>Available via Homebrew and Cargo. Works on macOS and Linux, Intel and ARM.</p>
@@ -524,94 +649,119 @@
   </div>
 </section>
 
-<!-- Install -->
-<section id="install">
-  <div class="section-label">Installation</div>
-  <h2>Get started in seconds</h2>
-  <p class="subtitle">Choose your preferred installation method.</p>
+<!-- Install + Usage side by side -->
+<div class="install-usage-row" id="get-started">
+  <div class="install-col">
+    <div class="section-label reveal-left">Installation</div>
+    <h2 class="reveal-left" style="font-size: 2.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 2rem;">Get started in seconds</h2>
 
-  <div class="install-methods">
-    <div class="install-card">
-      <h3>Homebrew <span class="badge">Recommended</span></h3>
-      <div class="code-block">
-        <code><span style="color: var(--green)">$</span> brew tap schlunsen/tap<br><span style="color: var(--green)">$</span> brew install hefty</code>
+    <div class="install-methods">
+      <div class="install-card reveal-left">
+        <h3>Homebrew <span class="badge">Recommended</span></h3>
+        <div class="code-block">
+          <code><span style="color: var(--green)">$</span> brew tap schlunsen/tap<br><span style="color: var(--green)">$</span> brew install hefty</code>
+        </div>
       </div>
-    </div>
-    <div class="install-card">
-      <h3>Cargo</h3>
-      <div class="code-block">
-        <code><span style="color: var(--green)">$</span> cargo install --git https://github.com/schlunsen/hefty</code>
+      <div class="install-card reveal-left">
+        <h3>Cargo</h3>
+        <div class="code-block">
+          <code><span style="color: var(--green)">$</span> cargo install --git https://github.com/schlunsen/hefty</code>
+        </div>
       </div>
-    </div>
-    <div class="install-card">
-      <h3>From Source</h3>
-      <div class="code-block">
-        <code><span style="color: var(--green)">$</span> git clone https://github.com/schlunsen/hefty.git<br><span style="color: var(--green)">$</span> cd hefty<br><span style="color: var(--green)">$</span> cargo build --release<br><span style="color: var(--green)">$</span> ./target/release/hefty --help</code>
+      <div class="install-card reveal-left">
+        <h3>From Source</h3>
+        <div class="code-block">
+          <code><span style="color: var(--green)">$</span> git clone https://github.com/schlunsen/hefty.git<br><span style="color: var(--green)">$</span> cd hefty && cargo build --release</code>
+        </div>
       </div>
     </div>
   </div>
-</section>
 
-<!-- Usage -->
-<section id="usage">
-  <div class="section-label">Usage</div>
-  <h2>Simple and powerful</h2>
-  <p class="subtitle">Scan any directory with a single command.</p>
+  <div class="usage-col">
+    <div class="section-label reveal-right">Usage</div>
+    <h2 class="reveal-right" style="font-size: 2.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 2rem;">Simple and powerful</h2>
 
-  <div class="code-block" style="margin-bottom: 2rem;">
-    <code>
+    <div class="code-block reveal-right" style="margin-bottom: 1.25rem;">
+      <code>
 <span style="color: var(--text-muted)"># Interactive TUI with treemap</span><br>
 <span style="color: var(--green)">$</span> hefty ~<br>
 <br>
-<span style="color: var(--text-muted)"># List the top 10 files over 100MB</span><br>
-<span style="color: var(--green)">$</span> hefty ~/projects --list -n 10 --min-size 100MB<br>
-<br>
-<span style="color: var(--text-muted)"># Scan current directory with defaults</span><br>
-<span style="color: var(--green)">$</span> hefty
-    </code>
-  </div>
+<span style="color: var(--text-muted)"># List top 10 files over 100MB</span><br>
+<span style="color: var(--green)">$</span> hefty ~/projects --list -n 10 --min-size 100MB
+      </code>
+    </div>
 
-  <div class="code-block" style="margin-bottom: 3rem;">
-    <code>
-hefty [OPTIONS] [PATH]<br>
-<br>
-<span style="color: var(--text-muted)">Arguments:</span><br>
-  [PATH]  Directory to scan <span style="color: var(--text-muted)">[default: .]</span><br>
-<br>
-<span style="color: var(--text-muted)">Options:</span><br>
-  -m, --min-size &lt;MIN_SIZE&gt;  Minimum file size <span style="color: var(--text-muted)">[default: 1MB]</span><br>
-  -n, --top &lt;TOP&gt;            Top N largest files <span style="color: var(--text-muted)">[default: 100]</span><br>
-  -l, --list                 Print results, no TUI<br>
-  -h, --help                 Print help<br>
-  -V, --version              Print version
-    </code>
+    <div class="reveal-right">
+      <h3 style="margin-bottom: 0.75rem; font-size: 1.1rem;">Keyboard Shortcuts</h3>
+      <table class="shortcuts-table">
+        <thead>
+          <tr><th>Key</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><kbd>&#8593;</kbd> / <kbd>k</kbd></td><td>Move up</td></tr>
+          <tr><td><kbd>&#8595;</kbd> / <kbd>j</kbd></td><td>Move down</td></tr>
+          <tr><td><kbd>PgUp</kbd> / <kbd>PgDn</kbd></td><td>Scroll fast</td></tr>
+          <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to top / bottom</td></tr>
+          <tr><td><kbd>Tab</kbd></td><td>Toggle treemap view</td></tr>
+          <tr><td><kbd>q</kbd> / <kbd>Esc</kbd></td><td>Quit</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
-
-  <h3 style="margin-bottom: 1.25rem; font-size: 1.3rem;">Keyboard Shortcuts</h3>
-  <table class="shortcuts-table">
-    <thead>
-      <tr><th>Key</th><th>Action</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><kbd>&#8593;</kbd> / <kbd>k</kbd></td><td>Move up</td></tr>
-      <tr><td><kbd>&#8595;</kbd> / <kbd>j</kbd></td><td>Move down</td></tr>
-      <tr><td><kbd>Page Up</kbd> / <kbd>Page Down</kbd></td><td>Scroll fast</td></tr>
-      <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to top / bottom</td></tr>
-      <tr><td><kbd>Tab</kbd></td><td>Toggle treemap view</td></tr>
-      <tr><td><kbd>q</kbd> / <kbd>Esc</kbd></td><td>Quit</td></tr>
-    </tbody>
-  </table>
-</section>
+</div>
 
 <!-- Footer -->
-<footer>
+<footer class="reveal">
   <p>
     <strong>hefty</strong> is open source under the <a href="https://github.com/schlunsen/hefty/blob/main/LICENSE">MIT License</a>.
     Built with Rust.
-    <br>
-    <a href="https://github.com/schlunsen/hefty" style="margin-top: 0.5rem; display: inline-block;">GitHub</a>
+    &middot;
+    <a href="https://github.com/schlunsen/hefty">GitHub</a>
   </p>
 </footer>
+
+<script>
+// Intersection Observer for scroll-triggered animations
+const observerOptions = {
+  threshold: 0.1,
+  rootMargin: '0px 0px -40px 0px'
+};
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, observerOptions);
+
+document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale').forEach(el => {
+  observer.observe(el);
+});
+
+// Hide scroll hint on scroll
+const scrollHint = document.querySelector('.scroll-hint');
+if (scrollHint) {
+  let hidden = false;
+  window.addEventListener('scroll', () => {
+    if (!hidden && window.scrollY > 100) {
+      scrollHint.style.transition = 'opacity 0.5s';
+      scrollHint.style.opacity = '0';
+      hidden = true;
+    }
+  });
+}
+
+// Smooth nav background on scroll
+const nav = document.querySelector('nav');
+window.addEventListener('scroll', () => {
+  if (window.scrollY > 20) {
+    nav.style.background = 'rgba(13, 17, 23, 0.95)';
+  } else {
+    nav.style.background = 'rgba(13, 17, 23, 0.85)';
+  }
+});
+</script>
 
 </body>
 </html>

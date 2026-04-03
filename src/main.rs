@@ -35,12 +35,10 @@ struct Cli {
 fn parse_size(s: &str) -> Result<u64> {
     let s = s.trim().to_uppercase();
 
-    // Handle plain numbers as bytes
     if let Ok(n) = s.parse::<u64>() {
         return Ok(n);
     }
 
-    // Parse things like "1MB", "500KB", "1.5GB"
     let bs: ByteSize = s
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid size: '{}'. Use formats like 1MB, 500KB, 1GB", s))?;
@@ -56,35 +54,34 @@ fn main() -> Result<()> {
         anyhow::bail!("'{}' is not a directory", path.display());
     }
 
-    eprintln!(
-        "Scanning {} (min size: {})...",
-        path.display(),
-        ByteSize(min_size)
-    );
-
-    let start = Instant::now();
-    let mut scan = scanner::scan_directory(&path, min_size)?;
-    let elapsed = start.elapsed();
-
-    eprintln!(
-        "Found {} files ({} total) in {:.2}s",
-        scan.files.len(),
-        ByteSize(scan.total_size),
-        elapsed.as_secs_f64()
-    );
-
-    // Apply top-N limit
-    if cli.top > 0 && scan.files.len() > cli.top {
-        scan.files.truncate(cli.top);
-    }
-
-    if scan.files.is_empty() {
-        eprintln!("No files found above minimum size threshold.");
-        return Ok(());
-    }
-
     if cli.list {
-        // Non-interactive list mode
+        // Blocking scan + print for list mode
+        eprintln!(
+            "Scanning {} (min size: {})...",
+            path.display(),
+            ByteSize(min_size)
+        );
+
+        let start = Instant::now();
+        let mut scan = scanner::scan_directory(&path, min_size)?;
+        let elapsed = start.elapsed();
+
+        eprintln!(
+            "Found {} files ({} total) in {:.2}s",
+            scan.files.len(),
+            ByteSize(scan.total_size),
+            elapsed.as_secs_f64()
+        );
+
+        if cli.top > 0 && scan.files.len() > cli.top {
+            scan.files.truncate(cli.top);
+        }
+
+        if scan.files.is_empty() {
+            eprintln!("No files found above minimum size threshold.");
+            return Ok(());
+        }
+
         println!("\n{:>12}  {}", "SIZE", "PATH");
         println!("{}", "─".repeat(80));
         for file in &scan.files {
@@ -94,9 +91,10 @@ fn main() -> Result<()> {
         println!("{}", "─".repeat(80));
         println!("{:>12}  Total scanned", ByteSize(scan.total_size));
     } else {
-        // Interactive TUI mode
+        // Launch TUI immediately, scan in background
+        let rx = scanner::scan_directory_async(path.clone(), min_size);
         let mut terminal = ratatui::init();
-        let result = ui::App::new(scan).run(&mut terminal);
+        let result = ui::App::new_live(path, rx, cli.top).run(&mut terminal);
         ratatui::restore();
         result?;
     }

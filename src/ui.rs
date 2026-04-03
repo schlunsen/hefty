@@ -1,4 +1,4 @@
-use crate::scanner::{FileEntry, ScanResult};
+use crate::scanner::{FileEntry, ScanMessage, ScanResult};
 use crate::treemap;
 use anyhow::Result;
 use bytesize::ByteSize;
@@ -10,6 +10,8 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     DefaultTerminal, Frame,
 };
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 const COLORS: &[Color] = &[
     Color::Blue,
@@ -26,6 +28,8 @@ const COLORS: &[Color] = &[
     Color::LightRed,
 ];
 
+const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 #[derive(Debug, Clone, PartialEq)]
 enum Dialog {
     None,
@@ -41,9 +45,43 @@ pub struct App {
     dialog: Dialog,
     deleted_bytes: u64,
     deleted_count: usize,
+    // Live scan state
+    scan_rx: Option<mpsc::Receiver<ScanMessage>>,
+    scanning: bool,
+    scan_file_count: u64,
+    scan_total_bytes: u64,
+    spinner_tick: usize,
+    top_n: usize,
 }
 
 impl App {
+    pub fn new_live(
+        root: std::path::PathBuf,
+        rx: mpsc::Receiver<ScanMessage>,
+        top_n: usize,
+    ) -> Self {
+        Self {
+            scan: ScanResult {
+                root,
+                files: Vec::new(),
+                total_size: 0,
+            },
+            selected: 0,
+            scroll_offset: 0,
+            show_treemap: true,
+            dialog: Dialog::None,
+            deleted_bytes: 0,
+            deleted_count: 0,
+            scan_rx: Some(rx),
+            scanning: true,
+            scan_file_count: 0,
+            scan_total_bytes: 0,
+            spinner_tick: 0,
+            top_n,
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn new(scan: ScanResult) -> Self {
         Self {
             scan,
@@ -53,69 +91,131 @@ impl App {
             dialog: Dialog::None,
             deleted_bytes: 0,
             deleted_count: 0,
+            scan_rx: None,
+            scanning: false,
+            scan_file_count: 0,
+            scan_total_bytes: 0,
+            spinner_tick: 0,
+            top_n: 0,
+        }
+    }
+
+    /// Drain all pending messages from the scanner
+    fn poll_scanner(&mut self) {
+        if let Some(rx) = &self.scan_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(ScanMessage::FileFound(entry)) => {
+                        self.scan.total_size = self.scan.total_size.saturating_add(entry.size);
+                        // Insert in sorted position (largest first)
+                        let pos = self
+                            .scan
+                            .files
+                            .binary_search_by(|f| entry.size.cmp(&f.size))
+                            .unwrap_or_else(|p| p);
+                        self.scan.files.insert(pos, entry);
+                        // Enforce top-N limit
+                        if self.top_n > 0 && self.scan.files.len() > self.top_n {
+                            self.scan.files.truncate(self.top_n);
+                        }
+                    }
+                    Ok(ScanMessage::Progress {
+                        file_count,
+                        total_bytes,
+                    }) => {
+                        self.scan_file_count = file_count;
+                        self.scan_total_bytes = total_bytes;
+                    }
+                    Ok(ScanMessage::Done) => {
+                        self.scanning = false;
+                        break;
+                    }
+                    Ok(ScanMessage::Error(_)) => {
+                        self.scanning = false;
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.scanning = false;
+                        break;
+                    }
+                }
+            }
         }
     }
 
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        let tick_rate = Duration::from_millis(50);
+        let mut last_tick = Instant::now();
+
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
+            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+            if event::poll(timeout)? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
 
-                match &self.dialog {
-                    Dialog::ConfirmDelete => match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            self.delete_selected();
-                        }
-                        _ => {
+                    match &self.dialog {
+                        Dialog::ConfirmDelete => match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                self.delete_selected();
+                            }
+                            _ => {
+                                self.dialog = Dialog::None;
+                            }
+                        },
+                        Dialog::DeleteResult(_) => {
                             self.dialog = Dialog::None;
                         }
-                    },
-                    Dialog::DeleteResult(_) => {
-                        self.dialog = Dialog::None;
+                        Dialog::None => match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if !self.scan.files.is_empty() {
+                                    self.selected =
+                                        (self.selected + 1).min(self.scan.files.len() - 1);
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                self.selected = self.selected.saturating_sub(1);
+                            }
+                            KeyCode::PageDown => {
+                                if !self.scan.files.is_empty() {
+                                    self.selected =
+                                        (self.selected + 20).min(self.scan.files.len() - 1);
+                                }
+                            }
+                            KeyCode::PageUp => {
+                                self.selected = self.selected.saturating_sub(20);
+                            }
+                            KeyCode::Home => {
+                                self.selected = 0;
+                            }
+                            KeyCode::End => {
+                                if !self.scan.files.is_empty() {
+                                    self.selected = self.scan.files.len() - 1;
+                                }
+                            }
+                            KeyCode::Tab => {
+                                self.show_treemap = !self.show_treemap;
+                            }
+                            KeyCode::Char('d') | KeyCode::Delete => {
+                                if !self.scan.files.is_empty() {
+                                    self.dialog = Dialog::ConfirmDelete;
+                                }
+                            }
+                            _ => {}
+                        },
                     }
-                    Dialog::None => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if !self.scan.files.is_empty() {
-                                self.selected =
-                                    (self.selected + 1).min(self.scan.files.len() - 1);
-                            }
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            self.selected = self.selected.saturating_sub(1);
-                        }
-                        KeyCode::PageDown => {
-                            if !self.scan.files.is_empty() {
-                                self.selected =
-                                    (self.selected + 20).min(self.scan.files.len() - 1);
-                            }
-                        }
-                        KeyCode::PageUp => {
-                            self.selected = self.selected.saturating_sub(20);
-                        }
-                        KeyCode::Home => {
-                            self.selected = 0;
-                        }
-                        KeyCode::End => {
-                            if !self.scan.files.is_empty() {
-                                self.selected = self.scan.files.len() - 1;
-                            }
-                        }
-                        KeyCode::Tab => {
-                            self.show_treemap = !self.show_treemap;
-                        }
-                        KeyCode::Char('d') | KeyCode::Delete => {
-                            if !self.scan.files.is_empty() {
-                                self.dialog = Dialog::ConfirmDelete;
-                            }
-                        }
-                        _ => {}
-                    },
                 }
+            }
+
+            if last_tick.elapsed() >= tick_rate {
+                self.poll_scanner();
+                self.spinner_tick = self.spinner_tick.wrapping_add(1);
+                last_tick = Instant::now();
             }
         }
     }
@@ -136,7 +236,6 @@ impl App {
                 self.scan.total_size = self.scan.total_size.saturating_sub(size);
                 self.scan.files.remove(self.selected);
 
-                // Adjust selection
                 if !self.scan.files.is_empty() && self.selected >= self.scan.files.len() {
                     self.selected = self.scan.files.len() - 1;
                 }
@@ -298,9 +397,13 @@ impl App {
     }
 
     fn draw_treemap(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Treemap (Tab to toggle) ");
+        let title = if self.scanning {
+            let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
+            format!(" {} Treemap (scanning...) ", spinner)
+        } else {
+            " Treemap (Tab to toggle) ".to_string()
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -308,7 +411,6 @@ impl App {
             return;
         }
 
-        // Use top N files that fit visually
         let max_items = (inner.width as usize * inner.height as usize).min(self.scan.files.len());
         let display_files = &self.scan.files[..max_items];
         let sizes: Vec<u64> = display_files.iter().map(|f| f.size).collect();
@@ -335,7 +437,6 @@ impl App {
                 Style::default().bg(color).fg(Color::Black)
             };
 
-            // Fill the rectangle
             for y in ry..ry.saturating_add(rh).min(inner.y + inner.height) {
                 for x in rx..rx.saturating_add(rw).min(inner.x + inner.width) {
                     if let Some(cell) = buf.cell_mut((x, y)) {
@@ -345,7 +446,6 @@ impl App {
                 }
             }
 
-            // Draw label if there's room
             if rw >= 4 && rh >= 1 {
                 let label = short_name(&self.scan.files[rect.index], rw as usize - 1);
                 for (i, ch) in label.chars().enumerate() {
@@ -362,13 +462,16 @@ impl App {
     }
 
     fn draw_file_list(&mut self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!(
-                " Files ({} total, {} shown) ",
-                self.scan.files.len(),
-                self.scan.files.len()
-            ));
+        let title = if self.scanning {
+            let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
+            format!(
+                " {} Files ({} found, scanning {} files...) ",
+                spinner, self.scan.files.len(), self.scan_file_count
+            )
+        } else {
+            format!(" Files ({}) ", self.scan.files.len())
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -377,7 +480,6 @@ impl App {
             return;
         }
 
-        // Adjust scroll to keep selection visible
         if self.selected < self.scroll_offset {
             self.scroll_offset = self.selected;
         }
@@ -424,11 +526,26 @@ impl App {
     }
 
     fn draw_status_bar(&self, frame: &mut Frame, area: Rect) {
-        let total = ByteSize(self.scan.total_size);
+        let scan_info = if self.scanning {
+            let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
+            format!(
+                " {} Scanning: {} files ({}) ",
+                spinner,
+                self.scan_file_count,
+                ByteSize(self.scan_total_bytes)
+            )
+        } else {
+            format!(
+                " Total: {} │ Files: {} ",
+                ByteSize(self.scan_total_bytes.max(self.scan.total_size)),
+                self.scan.files.len()
+            )
+        };
+
         let selected_info = if !self.scan.files.is_empty() {
             let f = &self.scan.files[self.selected];
             format!(
-                "  │  Selected: {} ({})",
+                "│ Selected: {} ({}) ",
                 f.path.file_name().unwrap_or_default().to_string_lossy(),
                 ByteSize(f.size)
             )
@@ -438,7 +555,7 @@ impl App {
 
         let freed_info = if self.deleted_count > 0 {
             format!(
-                "  │  Freed: {} ({} files)",
+                "│ Freed: {} ({} files) ",
                 ByteSize(self.deleted_bytes),
                 self.deleted_count
             )
@@ -447,11 +564,8 @@ impl App {
         };
 
         let status = format!(
-            " Total: {} │ Files: {}{}{}  │  ↑↓ navigate  d delete  Tab treemap  q quit",
-            total,
-            self.scan.files.len(),
-            selected_info,
-            freed_info,
+            "{}{}{}│ ↑↓ navigate  d delete  Tab treemap  q quit",
+            scan_info, selected_info, freed_info,
         );
 
         let block = Block::default().borders(Borders::ALL);
