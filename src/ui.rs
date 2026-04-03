@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     DefaultTerminal, Frame,
 };
 
@@ -26,11 +26,21 @@ const COLORS: &[Color] = &[
     Color::LightRed,
 ];
 
+#[derive(Debug, Clone, PartialEq)]
+enum Dialog {
+    None,
+    ConfirmDelete,
+    DeleteResult(String),
+}
+
 pub struct App {
     scan: ScanResult,
     selected: usize,
     scroll_offset: usize,
     show_treemap: bool,
+    dialog: Dialog,
+    deleted_bytes: u64,
+    deleted_count: usize,
 }
 
 impl App {
@@ -40,6 +50,9 @@ impl App {
             selected: 0,
             scroll_offset: 0,
             show_treemap: true,
+            dialog: Dialog::None,
+            deleted_bytes: 0,
+            deleted_count: 0,
         }
     }
 
@@ -51,38 +64,95 @@ impl App {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if !self.scan.files.is_empty() {
-                            self.selected = (self.selected + 1).min(self.scan.files.len() - 1);
+
+                match &self.dialog {
+                    Dialog::ConfirmDelete => match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.delete_selected();
                         }
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        self.selected = self.selected.saturating_sub(1);
-                    }
-                    KeyCode::PageDown => {
-                        if !self.scan.files.is_empty() {
-                            self.selected =
-                                (self.selected + 20).min(self.scan.files.len() - 1);
+                        _ => {
+                            self.dialog = Dialog::None;
                         }
+                    },
+                    Dialog::DeleteResult(_) => {
+                        self.dialog = Dialog::None;
                     }
-                    KeyCode::PageUp => {
-                        self.selected = self.selected.saturating_sub(20);
-                    }
-                    KeyCode::Home => {
-                        self.selected = 0;
-                    }
-                    KeyCode::End => {
-                        if !self.scan.files.is_empty() {
-                            self.selected = self.scan.files.len() - 1;
+                    Dialog::None => match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if !self.scan.files.is_empty() {
+                                self.selected =
+                                    (self.selected + 1).min(self.scan.files.len() - 1);
+                            }
                         }
-                    }
-                    KeyCode::Tab => {
-                        self.show_treemap = !self.show_treemap;
-                    }
-                    _ => {}
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            self.selected = self.selected.saturating_sub(1);
+                        }
+                        KeyCode::PageDown => {
+                            if !self.scan.files.is_empty() {
+                                self.selected =
+                                    (self.selected + 20).min(self.scan.files.len() - 1);
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            self.selected = self.selected.saturating_sub(20);
+                        }
+                        KeyCode::Home => {
+                            self.selected = 0;
+                        }
+                        KeyCode::End => {
+                            if !self.scan.files.is_empty() {
+                                self.selected = self.scan.files.len() - 1;
+                            }
+                        }
+                        KeyCode::Tab => {
+                            self.show_treemap = !self.show_treemap;
+                        }
+                        KeyCode::Char('d') | KeyCode::Delete => {
+                            if !self.scan.files.is_empty() {
+                                self.dialog = Dialog::ConfirmDelete;
+                            }
+                        }
+                        _ => {}
+                    },
                 }
+            }
+        }
+    }
+
+    fn delete_selected(&mut self) {
+        if self.scan.files.is_empty() {
+            return;
+        }
+
+        let file = &self.scan.files[self.selected];
+        let path = file.path.clone();
+        let size = file.size;
+
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                self.deleted_bytes += size;
+                self.deleted_count += 1;
+                self.scan.total_size = self.scan.total_size.saturating_sub(size);
+                self.scan.files.remove(self.selected);
+
+                // Adjust selection
+                if !self.scan.files.is_empty() && self.selected >= self.scan.files.len() {
+                    self.selected = self.scan.files.len() - 1;
+                }
+
+                self.dialog = Dialog::DeleteResult(format!(
+                    "Deleted {} (freed {})",
+                    path.file_name().unwrap_or_default().to_string_lossy(),
+                    ByteSize(size)
+                ));
+            }
+            Err(e) => {
+                self.dialog = Dialog::DeleteResult(format!(
+                    "Error deleting {}: {}",
+                    path.file_name().unwrap_or_default().to_string_lossy(),
+                    e
+                ));
             }
         }
     }
@@ -93,18 +163,12 @@ impl App {
         if self.show_treemap {
             let outer = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(5),
-                    Constraint::Length(3),
-                ])
+                .constraints([Constraint::Min(5), Constraint::Length(3)])
                 .split(size);
 
             let columns = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(50),
-                    Constraint::Percentage(50),
-                ])
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(outer[0]);
 
             self.draw_treemap(frame, columns[0]);
@@ -113,15 +177,124 @@ impl App {
         } else {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(5),
-                    Constraint::Length(3),
-                ])
+                .constraints([Constraint::Min(5), Constraint::Length(3)])
                 .split(size);
 
             self.draw_file_list(frame, chunks[0]);
             self.draw_status_bar(frame, chunks[1]);
         }
+
+        // Draw dialog on top
+        match &self.dialog {
+            Dialog::ConfirmDelete => self.draw_confirm_dialog(frame, size),
+            Dialog::DeleteResult(msg) => self.draw_result_dialog(frame, size, msg.clone()),
+            Dialog::None => {}
+        }
+    }
+
+    fn draw_confirm_dialog(&self, frame: &mut Frame, area: Rect) {
+        if self.scan.files.is_empty() {
+            return;
+        }
+
+        let file = &self.scan.files[self.selected];
+        let name = file
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let rel_path = file
+            .path
+            .strip_prefix(&self.scan.root)
+            .unwrap_or(&file.path)
+            .display()
+            .to_string();
+
+        let dialog_width = 60.min(area.width.saturating_sub(4));
+        let dialog_height = 8_u16;
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+        let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
+
+        frame.render_widget(Clear, dialog_area);
+
+        let text = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  Delete "),
+                Span::styled(
+                    &name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" ({})", ByteSize(file.size)),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw(" ?"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  {}", rel_path),
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  Press "),
+                Span::styled(
+                    "y",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" to confirm, any other key to cancel"),
+            ]),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title(" Delete File ");
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, dialog_area);
+    }
+
+    fn draw_result_dialog(&self, frame: &mut Frame, area: Rect, msg: String) {
+        let dialog_width = 60.min(area.width.saturating_sub(4));
+        let dialog_height = 5_u16;
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+        let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
+
+        frame.render_widget(Clear, dialog_area);
+
+        let is_error = msg.starts_with("Error");
+        let color = if is_error { Color::Red } else { Color::Green };
+
+        let text = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  {}", msg),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "  Press any key to continue",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(color))
+            .title(if is_error { " Error " } else { " Deleted " });
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, dialog_area);
     }
 
     fn draw_treemap(&self, frame: &mut Frame, area: Rect) {
@@ -213,7 +386,8 @@ impl App {
         }
 
         let mut lines: Vec<Line> = Vec::new();
-        for (i, file) in self.scan
+        for (i, file) in self
+            .scan
             .files
             .iter()
             .enumerate()
@@ -262,11 +436,22 @@ impl App {
             String::new()
         };
 
+        let freed_info = if self.deleted_count > 0 {
+            format!(
+                "  │  Freed: {} ({} files)",
+                ByteSize(self.deleted_bytes),
+                self.deleted_count
+            )
+        } else {
+            String::new()
+        };
+
         let status = format!(
-            " Total: {} │ Files: {}{}  │  ↑↓ navigate  Tab treemap  q quit",
+            " Total: {} │ Files: {}{}{}  │  ↑↓ navigate  d delete  Tab treemap  q quit",
             total,
             self.scan.files.len(),
             selected_info,
+            freed_info,
         );
 
         let block = Block::default().borders(Borders::ALL);
