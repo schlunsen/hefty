@@ -5,17 +5,20 @@ import SwiftUI
 struct BlockBorderView: View {
     let isScanning: Bool
 
-    // Warm palette for the blocks
-    private static let palette: [(Double, Double, Double)] = [
-        (1.0, 0.55, 0.05),   // orange
-        (1.0, 0.40, 0.05),   // deep orange
-        (0.95, 0.50, 0.10),  // amber
-        (1.0, 0.65, 0.15),   // light orange
-        (0.85, 0.35, 0.10),  // burnt orange
-        (0.65, 0.30, 0.80),  // purple
-        (0.40, 0.50, 0.90),  // blue
-        (0.30, 0.70, 0.60),  // teal
-    ]
+    // Pre-computed warm palette as Color values
+    private static let paletteColors: [Color] = {
+        let rgb: [(Double, Double, Double)] = [
+            (1.0, 0.55, 0.05),   // orange
+            (1.0, 0.40, 0.05),   // deep orange
+            (0.95, 0.50, 0.10),  // amber
+            (1.0, 0.65, 0.15),   // light orange
+            (0.85, 0.35, 0.10),  // burnt orange
+            (0.65, 0.30, 0.80),  // purple
+            (0.40, 0.50, 0.90),  // blue
+            (0.30, 0.70, 0.60),  // teal
+        ]
+        return rgb.map { Color(red: $0.0, green: $0.1, blue: $0.2) }
+    }()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
@@ -24,6 +27,7 @@ struct BlockBorderView: View {
                 drawBorder(context: context, size: size, time: time)
             }
         }
+        .drawingGroup() // Metal-backed rendering for smoother compositing
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .allowsHitTesting(false)
     }
@@ -43,104 +47,118 @@ struct BlockBorderView: View {
         )
 
         // Total perimeter distance for continuous flow
-        let perimeter = 2.0 * (w + h)
+        let perimeter = 2.0 * (Double(w) + Double(h))
 
         // Flow speed: how fast the highlight chases around
         let flowSpeed = scanning ? 120.0 : 30.0
         let flowPos = time * flowSpeed
 
+        // Pre-compute flow positions (avoid repeated modulo)
+        let flowMod = flowPos.truncatingRemainder(dividingBy: perimeter)
+        let flow2Mod = (flowPos * 0.6 + perimeter * 0.4).truncatingRemainder(dividingBy: perimeter)
+        let halfPerimeter = perimeter * 0.5
+        let bandWidth = scanning ? 200.0 : 120.0
+        let bandWidth2 = bandWidth * 0.7
+        let invBandWidth = 1.0 / bandWidth
+        let invBandWidth2 = 1.0 / bandWidth2
+        let baseBrightness = scanning ? 0.45 : 0.55
+
         // Top edge: left to right
-        var dist: CGFloat = 0
+        var dist: Double = 0
+        var globalIndex = 0
         let topCount = Int(w / blockLen)
         for i in 0..<topCount {
             let x = CGFloat(i) * blockLen
-            let d = dist + CGFloat(i) * blockLen
+            let d = dist + Double(i) * Double(blockLen)
             let rect = CGRect(x: x, y: 0, width: blockLen - gap, height: bw - gap)
             drawBlock(context: context, rect: rect, dist: d, perimeter: perimeter,
-                      flowPos: flowPos, index: i, time: time, scanning: scanning)
+                      flowMod: flowMod, flow2Mod: flow2Mod, halfPerimeter: halfPerimeter,
+                      invBandWidth: invBandWidth, invBandWidth2: invBandWidth2,
+                      baseBrightness: baseBrightness, index: globalIndex,
+                      time: time, palette: Self.paletteColors)
+            globalIndex += 1
         }
-        dist += w
+        dist += Double(w)
 
         // Right edge: top to bottom
         let rightCount = Int((h - 2 * bw) / blockLen)
         for i in 0..<rightCount {
             let y = bw + CGFloat(i) * blockLen
-            let d = dist + CGFloat(i) * blockLen
+            let d = dist + Double(i) * Double(blockLen)
             let rect = CGRect(x: w - bw, y: y, width: bw - gap, height: blockLen - gap)
             drawBlock(context: context, rect: rect, dist: d, perimeter: perimeter,
-                      flowPos: flowPos, index: topCount + i, time: time, scanning: scanning)
+                      flowMod: flowMod, flow2Mod: flow2Mod, halfPerimeter: halfPerimeter,
+                      invBandWidth: invBandWidth, invBandWidth2: invBandWidth2,
+                      baseBrightness: baseBrightness, index: globalIndex,
+                      time: time, palette: Self.paletteColors)
+            globalIndex += 1
         }
-        dist += (h - 2 * bw)
+        dist += Double(h - 2 * bw)
 
         // Bottom edge: right to left
         let bottomCount = Int(w / blockLen)
         for i in 0..<bottomCount {
             let x = w - CGFloat(i + 1) * blockLen
-            let d = dist + CGFloat(i) * blockLen
+            let d = dist + Double(i) * Double(blockLen)
             let rect = CGRect(x: x, y: h - bw, width: blockLen - gap, height: bw - gap)
             drawBlock(context: context, rect: rect, dist: d, perimeter: perimeter,
-                      flowPos: flowPos, index: topCount + rightCount + i, time: time, scanning: scanning)
+                      flowMod: flowMod, flow2Mod: flow2Mod, halfPerimeter: halfPerimeter,
+                      invBandWidth: invBandWidth, invBandWidth2: invBandWidth2,
+                      baseBrightness: baseBrightness, index: globalIndex,
+                      time: time, palette: Self.paletteColors)
+            globalIndex += 1
         }
-        dist += w
+        dist += Double(w)
 
         // Left edge: bottom to top
         let leftCount = Int((h - 2 * bw) / blockLen)
         for i in 0..<leftCount {
             let y = h - bw - CGFloat(i + 1) * blockLen
-            let d = dist + CGFloat(i) * blockLen
+            let d = dist + Double(i) * Double(blockLen)
             let rect = CGRect(x: 0, y: y, width: bw - gap, height: blockLen - gap)
             drawBlock(context: context, rect: rect, dist: d, perimeter: perimeter,
-                      flowPos: flowPos, index: topCount + rightCount + bottomCount + i, time: time, scanning: scanning)
+                      flowMod: flowMod, flow2Mod: flow2Mod, halfPerimeter: halfPerimeter,
+                      invBandWidth: invBandWidth, invBandWidth2: invBandWidth2,
+                      baseBrightness: baseBrightness, index: globalIndex,
+                      time: time, palette: Self.paletteColors)
+            globalIndex += 1
         }
     }
 
     private func drawBlock(
-        context: GraphicsContext, rect: CGRect, dist: CGFloat, perimeter: CGFloat,
-        flowPos: Double, index: Int, time: Double, scanning: Bool
+        context: GraphicsContext, rect: CGRect, dist: Double, perimeter: Double,
+        flowMod: Double, flow2Mod: Double, halfPerimeter: Double,
+        invBandWidth: Double, invBandWidth2: Double,
+        baseBrightness: Double, index: Int,
+        time: Double, palette: [Color]
     ) {
-        // Color from palette based on index
-        let seed = index &* 2654435761
-        let cIdx = ((seed >> 4) % Self.palette.count + Self.palette.count) % Self.palette.count
-        let c = Self.palette[cIdx]
+        // Deterministic palette lookup via hash
+        let raw = (index &* 2654435761) >> 4
+        let cIdx = ((raw % palette.count) + palette.count) % palette.count
+        let baseColor = palette[cIdx]
 
-        // Flow highlight: a bright band that travels around the perimeter
-        let normalizedDist = Double(dist).truncatingRemainder(dividingBy: Double(perimeter))
-        let normalizedFlow = flowPos.truncatingRemainder(dividingBy: Double(perimeter))
+        // Distance from flow position (wrapping around perimeter)
+        var delta = abs(dist - flowMod)
+        if delta > halfPerimeter { delta = perimeter - delta }
 
-        // Distance from flow position (wrapping around)
-        var delta = abs(normalizedDist - normalizedFlow)
-        if delta > Double(perimeter) / 2 {
-            delta = Double(perimeter) - delta
-        }
+        // Smooth highlight with cubic ease for silkier transitions
+        let highlight = max(0, 1.0 - delta * invBandWidth)
+        let smoothHighlight = highlight * highlight * highlight // cubic ease
 
-        // Highlight band width
-        let bandWidth = scanning ? 200.0 : 120.0
-        let highlight = max(0, 1.0 - delta / bandWidth)
-        let smoothHighlight = highlight * highlight // ease-in curve
-
-        // Second band for richer effect
-        let normalizedFlow2 = (flowPos * 0.6 + Double(perimeter) * 0.4).truncatingRemainder(dividingBy: Double(perimeter))
-        var delta2 = abs(normalizedDist - normalizedFlow2)
-        if delta2 > Double(perimeter) / 2 {
-            delta2 = Double(perimeter) - delta2
-        }
-        let highlight2 = max(0, 1.0 - delta2 / (bandWidth * 0.7))
+        // Second band
+        var delta2 = abs(dist - flow2Mod)
+        if delta2 > halfPerimeter { delta2 = perimeter - delta2 }
+        let highlight2 = max(0, 1.0 - delta2 * invBandWidth2)
         let smoothHighlight2 = highlight2 * highlight2 * 0.5
 
-        // Gentle base shimmer
-        let shimmerPhase = Double(seed % 6283) / 1000.0
-        let shimmer = Foundation.sin(time * 1.2 + shimmerPhase) * 0.08
+        // Gentle base shimmer (pre-computed phase from index)
+        let shimmerPhase = Double((index &* 2654435761) % 6283) / 1000.0
+        let shimmer = sin(time * 1.2 + shimmerPhase) * 0.08
 
         // Final brightness
-        let baseBrightness = scanning ? 0.45 : 0.55
         let brightness = baseBrightness + smoothHighlight * 0.55 + smoothHighlight2 * 0.3 + shimmer
 
-        // Shift color toward white for highlights
-        let r = c.0 + (1.0 - c.0) * smoothHighlight * 0.4
-        let g = c.1 + (1.0 - c.1) * smoothHighlight * 0.4
-        let b = c.2 + (1.0 - c.2) * smoothHighlight * 0.4
-
-        context.fill(Path(rect), with: .color(Color(red: r, green: g, blue: b).opacity(brightness)))
-        context.stroke(Path(rect), with: .color(Color.black.opacity(0.3)), lineWidth: 0.5)
+        context.fill(Path(rect), with: .color(baseColor.opacity(brightness)))
+        // Removed per-block stroke — gap separation is sufficient and much cheaper
     }
 }
