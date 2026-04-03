@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../hefty-${{ matrix.target }}.tar.gz hefty
+          cd ../../..
+          shasum -a 256 hefty-${{ matrix.target }}.tar.gz > hefty-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hefty-${{ matrix.target }}
+          path: |
+            hefty-${{ matrix.target }}.tar.gz
+            hefty-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            hefty-*.tar.gz
+            hefty-*.tar.gz.sha256
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: schlunsen/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Download SHA256 files
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          pattern: "*.sha256"
+
+      - name: Update formula
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          MAC_ARM_SHA=$(cat hefty-aarch64-apple-darwin.tar.gz.sha256 | awk '{print $1}')
+          MAC_INTEL_SHA=$(cat hefty-x86_64-apple-darwin.tar.gz.sha256 | awk '{print $1}')
+          LINUX_AMD_SHA=$(cat hefty-x86_64-unknown-linux-gnu.tar.gz.sha256 | awk '{print $1}')
+          LINUX_ARM_SHA=$(cat hefty-aarch64-unknown-linux-gnu.tar.gz.sha256 | awk '{print $1}')
+
+          cat > Formula/hefty.rb << EOF
+          class Hefty < Formula
+            desc "A fast CLI disk usage analyzer — find the hefty files hogging your disk space"
+            homepage "https://github.com/schlunsen/hefty"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/schlunsen/hefty/releases/download/v${VERSION}/hefty-aarch64-apple-darwin.tar.gz"
+                sha256 "${MAC_ARM_SHA}"
+              else
+                url "https://github.com/schlunsen/hefty/releases/download/v${VERSION}/hefty-x86_64-apple-darwin.tar.gz"
+                sha256 "${MAC_INTEL_SHA}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/schlunsen/hefty/releases/download/v${VERSION}/hefty-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "${LINUX_ARM_SHA}"
+              else
+                url "https://github.com/schlunsen/hefty/releases/download/v${VERSION}/hefty-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${LINUX_AMD_SHA}"
+              end
+            end
+
+            def install
+              bin.install "hefty"
+            end
+
+            test do
+              assert_match "hefty", shell_output("#{bin}/hefty --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/hefty.rb
+          git commit -m "Update hefty to ${GITHUB_REF_NAME#v}"
+          git push

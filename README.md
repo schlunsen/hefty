@@ -14,13 +14,24 @@ A fast CLI disk usage analyzer inspired by [GrandPerspective](https://grandpersp
 
 ## Install
 
+### Homebrew
+
 ```sh
-cargo install --path .
+brew tap schlunsen/tap
+brew install hefty
 ```
 
-Or build from source:
+### Cargo
 
 ```sh
+cargo install --git https://github.com/schlunsen/hefty
+```
+
+### From source
+
+```sh
+git clone https://github.com/schlunsen/hefty.git
+cd hefty
 cargo build --release
 ./target/release/hefty --help
 ```
