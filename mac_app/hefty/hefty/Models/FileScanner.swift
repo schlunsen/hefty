@@ -15,9 +15,9 @@ final class FileScanner {
 
     private var scanTask: Task<Void, Never>?
     private var topN: Int = 100
-    var minSize: UInt64 = 1_000_000 // 1 MB default
+    var minSize: UInt64 = 0
 
-    func startScan(path: URL, minSize: UInt64 = 1_000_000, topN: Int = 100) {
+    func startScan(path: URL, minSize: UInt64 = 0, topN: Int = 500) {
         // Cancel any existing scan
         scanTask?.cancel()
 

@@ -22,6 +22,17 @@ enum TreemapLayout {
         return rects
     }
 
+    /// Layout with pre-indexed items, allowing callers to preserve original indices
+    /// even when passing a filtered subset of files.
+    static func layoutIndexed(items: [(Int, UInt64)], width: Double, height: Double) -> [TreemapRect] {
+        if items.isEmpty { return [] }
+
+        var rects: [TreemapRect] = []
+        rects.reserveCapacity(items.count)
+        squarify(items: items, x: 0, y: 0, w: width, h: height, rects: &rects)
+        return rects
+    }
+
     private static func squarify(
         items: [(Int, UInt64)],
         x: Double, y: Double,

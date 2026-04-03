@@ -515,7 +515,7 @@ struct MainWindowView: View {
 
     private func startScan(url: URL) {
         selectedIndex = nil
-        scanner.startScan(path: url, minSize: 1_000_000, topN: 100)
+        scanner.startScan(path: url, minSize: 0, topN: 500)
     }
 
     private func rescan() {

@@ -16,11 +16,26 @@ struct TreemapView: View {
         Color(red: 1.0, green: 0.5, blue: 0.5),
     ]
 
+    /// Filter out files that are too tiny to visualize meaningfully.
+    /// Files smaller than 0.1% of the largest file would be sub-pixel slivers
+    /// and just add visual noise to the treemap.
+    private var visualIndices: [(originalIndex: Int, file: FileEntry)] {
+        guard let largest = files.first?.size, largest > 0 else {
+            return files.enumerated().map { ($0.offset, $0.element) }
+        }
+        let threshold = max(largest / 1000, 1) // 0.1% of largest file
+        return files.enumerated().compactMap { index, file in
+            file.size >= threshold ? (index, file) : nil
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
-            let sizes = files.map(\.size)
-            let rects = TreemapLayout.layout(
-                sizes: sizes,
+            let visible = visualIndices
+            // Build indexed sizes that preserve original file indices
+            let indexedSizes: [(Int, UInt64)] = visible.map { ($0.originalIndex, $0.file.size) }
+            let rects = TreemapLayout.layoutIndexed(
+                items: indexedSizes,
                 width: Double(geometry.size.width),
                 height: Double(geometry.size.height)
             )

@@ -60,8 +60,40 @@ jobs:
             hefty-${{ matrix.target }}.tar.gz
             hefty-${{ matrix.target }}.tar.gz.sha256
 
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build macOS app
+        run: |
+          xcodebuild -project mac_app/hefty/hefty.xcodeproj \
+            -scheme hefty \
+            -configuration Release \
+            -derivedDataPath build/mac_app \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Create DMG
+        run: |
+          APP_PATH=$(find build/mac_app -name "hefty.app" -type d | head -1)
+          mkdir -p build/dmg
+          cp -R "$APP_PATH" build/dmg/
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname "Hefty" \
+            -srcfolder build/dmg \
+            -ov -format UDZO \
+            build/hefty-macos.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hefty-dmg
+          path: build/hefty-macos.dmg
+
   release:
-    needs: build
+    needs: [build, dmg]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +110,7 @@ jobs:
           files: |
             hefty-*.tar.gz
             hefty-*.tar.gz.sha256
+            hefty-macos.dmg
 
   update-homebrew:
     needs: release
