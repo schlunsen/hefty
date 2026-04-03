@@ -45,3 +45,7 @@ clean:
 # Install binary to ~/.cargo/bin
 install:
     cargo install --path .
+
+# Preview GitHub Pages site locally
+preview:
+    open docs/index.html
