@@ -301,11 +301,22 @@
       background:rgba(0,0,0,0.3);border:1px solid var(--border);
       border-radius:8px;padding:0.65rem 0.9rem;
       font-family:'JetBrains Mono',monospace;font-size:0.78rem;overflow-x:auto;
+      position:relative;
     }
     .i-code .p{color:var(--green)}
+    .copy-btn{
+      position:absolute;top:0.5rem;right:0.5rem;
+      background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
+      color:var(--muted);font-size:0.65rem;font-family:'JetBrains Mono',monospace;
+      padding:0.2rem 0.5rem;border-radius:6px;cursor:pointer;
+      transition:all 0.25s;display:flex;align-items:center;gap:0.3rem;
+    }
+    .copy-btn:hover{color:var(--accent);background:rgba(88,166,255,0.1);border-color:rgba(88,166,255,0.3)}
+    .copy-btn.copied{color:var(--green)!important;background:rgba(63,185,80,0.1)!important;border-color:rgba(63,185,80,0.3)!important}
+    .copy-btn svg{width:12px;height:12px}
     .usage-box{
       background:var(--card);border:1px solid var(--border);
-      border-radius:12px;padding:1.5rem;
+      border-radius:12px;padding:1.5rem;position:relative;
       font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:2;
     }
     .usage-box .c{color:var(--muted)}.usage-box .p{color:var(--green)}
@@ -441,15 +452,15 @@
         <h3 class="stagger">Install</h3>
         <div class="i-card ic-anim">
           <h4>Homebrew <span class="tag">recommended</span></h4>
-          <div class="i-code"><span class="p">$</span> brew tap schlunsen/tap<br><span class="p">$</span> brew install hefty</div>
+          <div class="i-code"><button class="copy-btn" onclick="copyCode(this,'brew tap schlunsen/tap &amp;&amp; brew install hefty')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> copy</button><span class="p">$</span> brew tap schlunsen/tap<br><span class="p">$</span> brew install hefty</div>
         </div>
         <div class="i-card ic-anim">
           <h4>Cargo</h4>
-          <div class="i-code"><span class="p">$</span> cargo install --git https://github.com/schlunsen/hefty</div>
+          <div class="i-code"><button class="copy-btn" onclick="copyCode(this,'cargo install --git https://github.com/schlunsen/hefty')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> copy</button><span class="p">$</span> cargo install --git https://github.com/schlunsen/hefty</div>
         </div>
         <div class="i-card ic-anim">
           <h4>From Source</h4>
-          <div class="i-code"><span class="p">$</span> git clone https://github.com/schlunsen/hefty.git<br><span class="p">$</span> cd hefty && cargo build --release</div>
+          <div class="i-code"><button class="copy-btn" onclick="copyCode(this,'git clone https://github.com/schlunsen/hefty.git &amp;&amp; cd hefty &amp;&amp; cargo build --release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> copy</button><span class="p">$</span> git clone https://github.com/schlunsen/hefty.git<br><span class="p">$</span> cd hefty && cargo build --release</div>
         </div>
       </div>
       <div class="i-col">
@@ -601,6 +612,15 @@ function copyCmd(el) {
   el.classList.add('copied');
   el.querySelector('.cp').textContent = 'copied!';
   setTimeout(() => { el.classList.remove('copied'); el.querySelector('.cp').textContent='copy'; }, 2000);
+}
+
+function copyCode(btn, text) {
+  event.stopPropagation();
+  navigator.clipboard.writeText(text);
+  btn.classList.add('copied');
+  const orig = btn.innerHTML;
+  btn.innerHTML = btn.innerHTML.replace('copy', 'copied!');
+  setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = orig; }, 2000);
 }
 
 // === Particles with connections ===
