@@ -213,9 +213,24 @@ struct MainWindowView: View {
             .buttonStyle(.plain)
             .padding(.top, 8)
 
+            Text("or quick scan")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.25))
+                .padding(.top, 4)
+
+            // Quick scan shortcuts
+            HStack(spacing: 10) {
+                quickScanButton(label: "Home", icon: "house.fill", url: FileManager.default.homeDirectoryForCurrentUser)
+                quickScanButton(label: "Downloads", icon: "arrow.down.circle.fill", url: FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first)
+                quickScanButton(label: "Documents", icon: "doc.fill", url: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
+                quickScanButton(label: "Desktop", icon: "menubar.dock.rectangle", url: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first)
+                quickScanButton(label: "Macintosh HD", icon: "internaldrive.fill", url: URL(fileURLWithPath: "/"))
+            }
+
             Text("or drag & drop a folder")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.25))
+                .padding(.top, 4)
 
             Spacer()
         }
@@ -223,6 +238,36 @@ struct MainWindowView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers: providers)
             return true
+        }
+    }
+
+    private func quickScanButton(label: String, icon: String, url: URL?) -> some View {
+        Button {
+            if let url {
+                chooseFolderPreNavigated(to: url)
+            }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(.white.opacity(0.5))
+            .frame(width: 80, height: 60)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white.opacity(0.05))
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
         }
     }
 
@@ -629,6 +674,19 @@ struct MainWindowView: View {
         panel.allowsMultipleSelection = false
         panel.message = "Choose a folder to scan for large files"
         panel.prompt = "Scan"
+        if panel.runModal() == .OK, let url = panel.url {
+            startScan(url: url)
+        }
+    }
+
+    private func chooseFolderPreNavigated(to directory: URL) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder to scan for large files"
+        panel.prompt = "Scan"
+        panel.directoryURL = directory
         if panel.runModal() == .OK, let url = panel.url {
             startScan(url: url)
         }
