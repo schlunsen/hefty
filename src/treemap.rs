@@ -23,14 +23,7 @@ pub fn layout(sizes: &[u64], width: f64, height: f64) -> Vec<TreemapRect> {
     rects
 }
 
-fn squarify(
-    items: &[(usize, u64)],
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    rects: &mut Vec<TreemapRect>,
-) {
+fn squarify(items: &[(usize, u64)], x: f64, y: f64, w: f64, h: f64, rects: &mut Vec<TreemapRect>) {
     if items.is_empty() || w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -117,6 +110,28 @@ fn squarify(
         }
         squarify(&items[split_at..], x, y + row_h, w, h - row_h, rects);
     }
+}
+
+fn worst_aspect_ratio(row: &[(usize, u64)], row_sum: f64, row_side: f64, fixed_side: f64) -> f64 {
+    if row_sum <= 0.0 || row_side <= 0.0 || fixed_side <= 0.0 {
+        return f64::MAX;
+    }
+
+    let mut worst = 0.0_f64;
+    for &(_, size) in row {
+        let item_frac = size as f64 / row_sum;
+        let item_side = fixed_side * item_frac;
+        if item_side <= 0.0 || row_side <= 0.0 {
+            continue;
+        }
+        let ratio = if row_side > item_side {
+            row_side / item_side
+        } else {
+            item_side / row_side
+        };
+        worst = worst.max(ratio);
+    }
+    worst
 }
 
 #[cfg(test)]
@@ -222,26 +237,4 @@ mod tests {
             assert!(rect.h > 0.0, "Height should be positive");
         }
     }
-}
-
-fn worst_aspect_ratio(row: &[(usize, u64)], row_sum: f64, row_side: f64, fixed_side: f64) -> f64 {
-    if row_sum <= 0.0 || row_side <= 0.0 || fixed_side <= 0.0 {
-        return f64::MAX;
-    }
-
-    let mut worst = 0.0_f64;
-    for &(_, size) in row {
-        let item_frac = size as f64 / row_sum;
-        let item_side = fixed_side * item_frac;
-        if item_side <= 0.0 || row_side <= 0.0 {
-            continue;
-        }
-        let ratio = if row_side > item_side {
-            row_side / item_side
-        } else {
-            item_side / row_side
-        };
-        worst = worst.max(ratio);
-    }
-    worst
 }
