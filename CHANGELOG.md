@@ -17,6 +17,7 @@
 - Rendering only redraws when state changes (lower CPU when idle)
 
 ### Mac app
+- **Folder drill-down view**: new Files/Folders toggle; browse per-directory totals with breadcrumb navigation, relative size bars, and a treemap of the current folder (click a folder block to descend)
 - Deletes now move files to the **Trash** instead of permanently removing them
 - **Reveal in Finder** and **Quick Look** (spacebar / context menu) for files in the list
 - **Full Disk Access guidance**: a banner appears when items can't be read, with a shortcut to System Settings

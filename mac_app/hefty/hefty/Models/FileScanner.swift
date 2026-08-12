@@ -13,6 +13,10 @@ final class FileScanner {
     var deletedBytes: UInt64 = 0
     var deletedCount: Int = 0
     var permissionDeniedCount: Int = 0
+    /// Aggregated size of every directory under the root (keyed by path).
+    var dirSizes: [String: UInt64] = [:]
+    /// Bumped whenever dirSizes is republished, so views can cheaply observe changes.
+    var dirSizesVersion: Int = 0
 
     private var scanTask: Task<Void, Never>?
     private var topN: Int = 100
@@ -32,6 +36,8 @@ final class FileScanner {
         deletedBytes = 0
         deletedCount = 0
         permissionDeniedCount = 0
+        dirSizes = [:]
+        dirSizesVersion = 0
         self.topN = topN
         self.minSize = minSize
 
@@ -134,6 +140,9 @@ final class FileScanner {
         var localTotalBytes: UInt64 = 0
         var batch: [FileEntry] = []
         let batchSize = 50
+        var localDirSizes: [String: UInt64] = [:]
+        var lastDirPublish: UInt64 = 0
+        let rootPathStr = path.path
 
         for case let fileURL as URL in enumerator {
             if Task.isCancelled { break }
@@ -150,6 +159,16 @@ final class FileScanner {
                 localTotalBytes = localTotalBytes &+ size
                 localFileCount += 1
 
+                // Aggregate per-directory totals up to the scan root
+                var dir = fileURL.deletingLastPathComponent()
+                while true {
+                    localDirSizes[dir.path, default: 0] &+= size
+                    if dir.path == rootPathStr || dir.path == "/" { break }
+                    let parent = dir.deletingLastPathComponent()
+                    if parent.path == dir.path { break }
+                    dir = parent
+                }
+
                 if size >= minSize {
                     batch.append(FileEntry(path: fileURL, size: size))
                 }
@@ -162,6 +181,15 @@ final class FileScanner {
                     let limit = self.topN
                     batch = []
 
+                    // Publish directory sizes every ~2000 files (dict copy is not free)
+                    let dirSnapshot: [String: UInt64]?
+                    if localFileCount - lastDirPublish >= 2000 {
+                        dirSnapshot = localDirSizes
+                        lastDirPublish = localFileCount
+                    } else {
+                        dirSnapshot = nil
+                    }
+
                     await MainActor.run {
                         for entry in currentBatch {
                             self.insertSorted(entry: entry)
@@ -173,6 +201,10 @@ final class FileScanner {
                         self.scanFileCount = count
                         self.scanTotalBytes = bytes
                         self.permissionDeniedCount = deniedCounter.count
+                        if let dirSnapshot {
+                            self.dirSizes = dirSnapshot
+                            self.dirSizesVersion += 1
+                        }
                     }
                 }
             } catch {
@@ -196,12 +228,38 @@ final class FileScanner {
 
         let finalCount = localFileCount
         let finalBytes = localTotalBytes
+        let finalDirSizes = localDirSizes
         await MainActor.run {
             self.scanFileCount = finalCount
             self.scanTotalBytes = finalBytes
             self.permissionDeniedCount = deniedCounter.count
+            self.dirSizes = finalDirSizes
+            self.dirSizesVersion += 1
             self.scanning = false
         }
+    }
+
+    // MARK: - Folder browsing helpers
+
+    /// Immediate subdirectories of `dir` with their aggregated sizes, largest first.
+    func childDirectories(of dir: URL) -> [(url: URL, size: UInt64)] {
+        let dirPath = dir.path
+        let prefix = dirPath.hasSuffix("/") ? dirPath : dirPath + "/"
+        var result: [(url: URL, size: UInt64)] = []
+        for (path, size) in dirSizes {
+            guard path.hasPrefix(prefix) else { continue }
+            let rest = path.dropFirst(prefix.count)
+            if !rest.isEmpty && !rest.contains("/") {
+                result.append((URL(fileURLWithPath: path, isDirectory: true), size))
+            }
+        }
+        return result.sorted { $0.size > $1.size }
+    }
+
+    /// Known large files directly inside `dir`, largest first (from the top-N list).
+    func childFiles(of dir: URL) -> [FileEntry] {
+        let dirPath = dir.path
+        return files.filter { $0.path.deletingLastPathComponent().path == dirPath }
     }
 
     /// Insert a file entry in sorted position (largest first)
