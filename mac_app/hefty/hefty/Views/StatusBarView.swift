@@ -33,6 +33,25 @@ struct StatusBarView: View {
 
             Spacer()
 
+            // Full Disk Access hint
+            if scanner.permissionDeniedCount > 0 {
+                Image(systemName: "lock.shield")
+                    .foregroundStyle(.yellow)
+                    .font(.caption)
+                Text("\(scanner.permissionDeniedCount) items couldn't be read due to permissions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Grant Full Disk Access") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.caption)
+                .controlSize(.small)
+                .help("Open System Settings > Privacy & Security > Full Disk Access")
+                Divider().frame(height: 12)
+            }
+
             // Freed space
             if scanner.deletedCount > 0 {
                 Divider().frame(height: 12)

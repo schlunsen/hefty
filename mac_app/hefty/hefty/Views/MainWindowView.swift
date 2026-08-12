@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import QuickLook
 
 /// Main rectangular window with animated block border
 struct MainWindowView: View {
@@ -13,6 +14,7 @@ struct MainWindowView: View {
     @State private var showAlert = false
     @State private var isHoveringClose = false
     @State private var keyMonitor: Any? = nil
+    @State private var previewURL: URL? = nil
 
     var body: some View {
         ZStack {
@@ -35,6 +37,11 @@ struct MainWindowView: View {
                     twoColumnView
                 }
 
+                // Full Disk Access hint (shown when some paths couldn't be read)
+                if scanner.permissionDeniedCount > 0 {
+                    permissionBanner
+                }
+
                 Divider().opacity(0.3)
 
                 // Status bar
@@ -47,26 +54,27 @@ struct MainWindowView: View {
         .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear { setupKeyboardMonitor() }
-        .alert("Delete File", isPresented: $showDeleteConfirm) {
+        .quickLookPreview($previewURL)
+        .alert("Move to Trash", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) { deleteTargetIndex = nil }
-            Button("Delete", role: .destructive) {
+            Button("Move to Trash", role: .destructive) {
                 if let index = deleteTargetIndex { performDelete(at: index) }
             }
         } message: {
             if let index = deleteTargetIndex, index < scanner.files.count {
                 let file = scanner.files[index]
-                Text("Delete \"\(file.name)\" (\(file.formattedSize))?\n\nThis cannot be undone.")
+                Text("Move \"\(file.name)\" (\(file.formattedSize)) to the Trash?\n\nYou can restore it from the Trash later.")
             }
         }
-        .alert("Batch Delete", isPresented: $showBatchDeleteConfirm) {
+        .alert("Move to Trash", isPresented: $showBatchDeleteConfirm) {
             Button("Cancel", role: .cancel) { }
-            Button("Delete All", role: .destructive) {
+            Button("Move All to Trash", role: .destructive) {
                 performBatchDelete()
             }
         } message: {
             let count = markedFiles.count
             let totalSize = markedTotalSize()
-            Text("Delete \(count) selected files (\(formattedBytes(totalSize)))?\n\nThis cannot be undone.")
+            Text("Move \(count) selected files (\(formattedBytes(totalSize))) to the Trash?\n\nYou can restore them from the Trash later.")
         }
         .alert("Result", isPresented: $showAlert) {
             Button("OK") { alertMessage = nil }
@@ -127,7 +135,7 @@ struct MainWindowView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "trash.fill")
                             .font(.system(size: 10))
-                        Text("Delete \(markedFiles.count)")
+                        Text("Trash \(markedFiles.count)")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .foregroundStyle(.white)
@@ -139,7 +147,7 @@ struct MainWindowView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help("Delete \(markedFiles.count) selected files")
+                .help("Move \(markedFiles.count) selected files to the Trash")
             }
 
             // Toolbar buttons
@@ -473,7 +481,7 @@ struct MainWindowView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.red.opacity(0.4))
-            .help("Delete")
+            .help("Move to Trash")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
@@ -499,17 +507,63 @@ struct MainWindowView: View {
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([file.path])
             }
+            Button("Quick Look") {
+                previewURL = file.path
+            }
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(file.path.path, forType: .string)
             }
             Divider()
             if !markedFiles.isEmpty {
-                Button("Delete \(markedFiles.count) Selected Files", role: .destructive) {
+                Button("Move \(markedFiles.count) Selected Files to Trash", role: .destructive) {
                     showBatchDeleteConfirm = true
                 }
             }
-            Button("Delete", role: .destructive) { confirmDelete(at: index) }
+            Button("Move to Trash", role: .destructive) { confirmDelete(at: index) }
+        }
+    }
+
+    // MARK: - Permission Banner
+
+    private var permissionBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 11))
+                .foregroundStyle(.yellow.opacity(0.8))
+
+            Text("\(scanner.permissionDeniedCount) items couldn't be read due to permissions. Grant Full Disk Access for complete results.")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer()
+
+            Button {
+                openFullDiskAccessSettings()
+            } label: {
+                Text("Grant Full Disk Access")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.black.opacity(0.8))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.yellow.opacity(0.8))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Open System Settings > Privacy & Security > Full Disk Access")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color.yellow.opacity(0.08))
+    }
+
+    private func openFullDiskAccessSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -558,7 +612,7 @@ struct MainWindowView: View {
                     .lineLimit(1)
             }
 
-            Text("↑↓ nav  ⌘+click select  ⌫ delete")
+            Text("↑↓ nav  ⌘+click select  ⌫ trash  ⌘Y quick look")
                 .font(.system(size: 9))
                 .foregroundStyle(.white.opacity(0.15))
         }
@@ -602,6 +656,12 @@ struct MainWindowView: View {
                     selectAll(); return nil
                 }
                 return event
+            case 16: // y
+                if modifiers.contains(.command) {
+                    // Cmd+Y = Quick Look (standard Finder shortcut)
+                    quickLookSelected(); return nil
+                }
+                return event
             default:
                 return event
             }
@@ -625,6 +685,11 @@ struct MainWindowView: View {
         } else if let idx = selectedIndex, idx < scanner.files.count {
             confirmDelete(at: idx)
         }
+    }
+
+    private func quickLookSelected() {
+        guard let idx = selectedIndex, idx < scanner.files.count else { return }
+        previewURL = scanner.files[idx].path
     }
 
     private func handleRevealKey() {
@@ -737,7 +802,7 @@ struct MainWindowView: View {
         markedFiles.removeAll()
 
         if result.failCount > 0 {
-            alertMessage = "Deleted \(result.successCount) files (\(formattedBytes(result.totalFreed)) freed), \(result.failCount) failed"
+            alertMessage = "Moved \(result.successCount) files to Trash (\(formattedBytes(result.totalFreed)) freed), \(result.failCount) failed"
             if let error = result.firstError {
                 alertMessage! += " — \(error)"
             }

@@ -12,6 +12,7 @@ final class FileScanner {
     var rootPath: URL?
     var deletedBytes: UInt64 = 0
     var deletedCount: Int = 0
+    var permissionDeniedCount: Int = 0
 
     private var scanTask: Task<Void, Never>?
     private var topN: Int = 100
@@ -30,6 +31,7 @@ final class FileScanner {
         rootPath = path
         deletedBytes = 0
         deletedCount = 0
+        permissionDeniedCount = 0
         self.topN = topN
         self.minSize = minSize
 
@@ -53,18 +55,18 @@ final class FileScanner {
         let size = file.size
 
         do {
-            try FileManager.default.removeItem(at: file.path)
+            try FileManager.default.trashItem(at: file.path, resultingItemURL: nil)
             deletedBytes += size
             deletedCount += 1
             totalSize = totalSize >= size ? totalSize - size : 0
             files.remove(at: index)
-            return (true, "Deleted \(name) (freed \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))")
+            return (true, "Moved \(name) to Trash (freed \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))")
         } catch {
-            return (false, "Error deleting \(name): \(error.localizedDescription)")
+            return (false, "Error moving \(name) to Trash: \(error.localizedDescription)")
         }
     }
 
-    /// Delete multiple files at the given indices. Returns summary.
+    /// Move multiple files at the given indices to the Trash. Returns summary.
     func deleteFiles(at indices: [Int]) -> (successCount: Int, failCount: Int, totalFreed: UInt64, firstError: String?) {
         // Sort descending so removal doesn't shift indices
         let sortedIndices = indices.sorted(by: >)
@@ -80,7 +82,7 @@ final class FileScanner {
 
             let file = files[index]
             do {
-                try FileManager.default.removeItem(at: file.path)
+                try FileManager.default.trashItem(at: file.path, resultingItemURL: nil)
                 deletedBytes += file.size
                 deletedCount += 1
                 totalSize = totalSize >= file.size ? totalSize - file.size : 0
@@ -90,7 +92,7 @@ final class FileScanner {
             } catch {
                 failCount += 1
                 if firstError == nil {
-                    firstError = "Error deleting \(file.name): \(error.localizedDescription)"
+                    firstError = "Error moving \(file.name) to Trash: \(error.localizedDescription)"
                 }
             }
         }
@@ -109,10 +111,20 @@ final class FileScanner {
         let fileManager = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
 
+        let deniedCounter = PermissionDeniedCounter()
+
         guard let enumerator = fileManager.enumerator(
             at: path,
             includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, error in
+                let nsError = error as NSError
+                if (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError)
+                    || (nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(EACCES) || nsError.code == Int(EPERM))) {
+                    deniedCounter.count += 1
+                }
+                return true // continue scanning past errors
+            }
         ) else {
             await MainActor.run { self.scanning = false }
             return
@@ -160,6 +172,7 @@ final class FileScanner {
                         }
                         self.scanFileCount = count
                         self.scanTotalBytes = bytes
+                        self.permissionDeniedCount = deniedCounter.count
                     }
                 }
             } catch {
@@ -186,6 +199,7 @@ final class FileScanner {
         await MainActor.run {
             self.scanFileCount = finalCount
             self.scanTotalBytes = finalBytes
+            self.permissionDeniedCount = deniedCounter.count
             self.scanning = false
         }
     }
@@ -195,4 +209,9 @@ final class FileScanner {
         let index = files.firstIndex(where: { $0.size < entry.size }) ?? files.count
         files.insert(entry, at: index)
     }
+}
+
+/// Reference box for counting permission-denied paths from the enumerator's error handler.
+private final class PermissionDeniedCounter {
+    var count = 0
 }
