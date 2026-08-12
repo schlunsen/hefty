@@ -252,7 +252,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 33HN83NDFB;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -260,7 +260,7 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Hefty needs access to your Apple Music library to calculate and display the disk space used by your music files, for example to help you identify large audio files taking up storage.";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Hefty scans your Apple Music library folder to measure the disk space used by each audio file. For example, Hefty will list your largest .m4a and .mp3 files by size so you can decide which ones to keep or remove to free up storage.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Rasmus Schlunsen. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -286,7 +286,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 33HN83NDFB;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -294,7 +294,7 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Hefty needs access to your Apple Music library to calculate and display the disk space used by your music files, for example to help you identify large audio files taking up storage.";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Hefty scans your Apple Music library folder to measure the disk space used by each audio file. For example, Hefty will list your largest .m4a and .mp3 files by size so you can decide which ones to keep or remove to free up storage.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Rasmus Schlunsen. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

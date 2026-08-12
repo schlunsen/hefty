@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hefty — Support</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:700px;margin:2rem auto;padding:0 1.5rem;color:#e6edf3;background:#050809;line-height:1.7}
+    h1{font-size:1.8rem;margin-bottom:0.25rem}
+    h2{font-size:1.2rem;margin-top:2rem;color:#58a6ff}
+    p,li{color:#8b949e}
+    a{color:#58a6ff}
+    ul{padding-left:1.5rem}
+    li{margin-bottom:0.5rem}
+    .faq{margin-top:1.5rem}
+    .faq details{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:1rem 1.25rem;margin-bottom:0.75rem}
+    .faq summary{cursor:pointer;font-weight:600;color:#e6edf3;font-size:0.95rem}
+    .faq details p{margin-top:0.75rem;margin-bottom:0}
+    .contact-box{background:rgba(88,166,255,0.06);border:1px solid rgba(88,166,255,0.15);border-radius:10px;padding:1.5rem;margin-top:2rem}
+    .contact-box h3{color:#58a6ff;margin-top:0;font-size:1.1rem}
+  </style>
+</head>
+<body>
+  <h1>Support</h1>
+  <p>Need help with Hefty? You're in the right place.</p>
+
+  <h2>Getting Started</h2>
+  <p>Hefty is a disk usage analyzer for macOS that helps you find the largest files on your Mac. To get started:</p>
+  <ul>
+    <li>Launch the app and click <strong>"Choose a Folder to Scan"</strong> or use one of the quick scan shortcuts (Home, Downloads, Documents, Desktop, or Macintosh HD).</li>
+    <li>Hefty will scan the selected folder and display the largest files in a treemap view and a sortable file list.</li>
+    <li>Click any file to select it, use <strong>Reveal in Finder</strong> to locate it, or delete files directly from the app.</li>
+  </ul>
+
+  <h2>Frequently Asked Questions</h2>
+  <div class="faq">
+    <details>
+      <summary>How do I scan a folder?</summary>
+      <p>Click the "Choose a Folder to Scan" button on the welcome screen, or use one of the quick scan shortcuts (Home, Downloads, Documents, Desktop, Macintosh HD). You can also drag and drop any folder onto the app window.</p>
+    </details>
+    <details>
+      <summary>Can I delete files from within the app?</summary>
+      <p>Yes. Select a file and click the trash icon, or press the Delete key. You can also select multiple files using Cmd+Click or the Space bar, then delete them all at once. A confirmation dialog will appear before any files are permanently removed.</p>
+    </details>
+    <details>
+      <summary>Is my data sent anywhere?</summary>
+      <p>No. Hefty operates entirely on your local device. It makes no network requests and collects no data. See our <a href="privacy.html">Privacy Policy</a> for details.</p>
+    </details>
+    <details>
+      <summary>Why does Hefty ask for access to my Music library?</summary>
+      <p>When scanning folders that contain your Music library, macOS requires permission to access those files. Hefty only uses this access to calculate file sizes and display disk usage — it never reads, modifies, or transmits the contents of your music files.</p>
+    </details>
+    <details>
+      <summary>The app isn't showing any files after scanning.</summary>
+      <p>This usually means there are no files above the minimum size threshold in the selected folder. Try scanning a different folder, or go to Settings and lower the default minimum file size.</p>
+    </details>
+    <details>
+      <summary>How do I change the scan settings?</summary>
+      <p>Go to <strong>Hefty &rarr; Settings</strong> (or press <strong>&#8984;,</strong>) to adjust the default minimum file size, maximum number of files to display, and other preferences.</p>
+    </details>
+  </div>
+
+  <h2>Keyboard Shortcuts</h2>
+  <ul>
+    <li><strong>&#8593; &#8595;</strong> — Navigate file list</li>
+    <li><strong>Space</strong> — Select/deselect file for batch operations</li>
+    <li><strong>&#8984;+Click</strong> — Toggle file selection</li>
+    <li><strong>&#8984;+A</strong> — Select all files</li>
+    <li><strong>Delete / Backspace</strong> — Delete selected file(s)</li>
+    <li><strong>Return</strong> — Reveal selected file in Finder</li>
+    <li><strong>&#8984;,</strong> — Open Settings</li>
+  </ul>
+
+  <div class="contact-box">
+    <h3>Contact Us</h3>
+    <p>If you have a question, found a bug, or need help, please reach out:</p>
+    <ul>
+      <li>Email: <a href="mailto:rasmus@schlunsen.com">rasmus@schlunsen.com</a></li>
+      <li>GitHub: <a href="https://github.com/schlunsen/hefty/issues">Report an issue</a></li>
+    </ul>
+    <p>We typically respond within 1-2 business days.</p>
+  </div>
+</body>
+</html>
