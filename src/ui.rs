@@ -289,7 +289,7 @@ impl App {
             }
         }
 
-        entries.sort_by(|a, b| b.size.cmp(&a.size));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.size));
         self.tree_entries = entries;
         self.clamp_selection();
     }

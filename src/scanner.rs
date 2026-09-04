@@ -266,7 +266,7 @@ pub fn scan_directory(path: &Path, options: ScanOptions) -> Result<ScanResult> {
         }
     }
 
-    files.sort_by(|a, b| b.size.cmp(&a.size));
+    files.sort_by_key(|f| std::cmp::Reverse(f.size));
 
     Ok(ScanResult {
         root: path.to_path_buf(),
