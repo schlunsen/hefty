@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import QuickLook
 
 /// Main rectangular window with animated block border
 struct MainWindowView: View {
@@ -13,6 +14,19 @@ struct MainWindowView: View {
     @State private var showAlert = false
     @State private var isHoveringClose = false
     @State private var keyMonitor: Any? = nil
+    @State private var previewURL: URL? = nil
+
+    // Folder drill-down state
+    @State private var browseMode: BrowseMode = .files
+    @State private var currentDir: URL? = nil
+    @State private var folderItems: [FolderItem] = []
+    @State private var folderTreemapEntries: [FileEntry] = []
+    @State private var selectedFolderItemID: UUID? = nil
+
+    enum BrowseMode: String, CaseIterable {
+        case files = "Files"
+        case folders = "Folders"
+    }
 
     var body: some View {
         ZStack {
@@ -35,6 +49,11 @@ struct MainWindowView: View {
                     twoColumnView
                 }
 
+                // Full Disk Access hint (shown when some paths couldn't be read)
+                if scanner.permissionDeniedCount > 0 {
+                    permissionBanner
+                }
+
                 Divider().opacity(0.3)
 
                 // Status bar
@@ -47,26 +66,33 @@ struct MainWindowView: View {
         .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear { setupKeyboardMonitor() }
-        .alert("Delete File", isPresented: $showDeleteConfirm) {
+        .quickLookPreview($previewURL)
+        .onChange(of: currentDir) { _, _ in rebuildFolderItems() }
+        .onChange(of: browseMode) { _, _ in rebuildFolderItems() }
+        .onChange(of: scanner.dirSizesVersion) { _, _ in rebuildFolderItems() }
+        .onChange(of: scanner.files.count) { _, _ in
+            if browseMode == .folders { rebuildFolderItems() }
+        }
+        .alert("Move to Trash", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) { deleteTargetIndex = nil }
-            Button("Delete", role: .destructive) {
+            Button("Move to Trash", role: .destructive) {
                 if let index = deleteTargetIndex { performDelete(at: index) }
             }
         } message: {
             if let index = deleteTargetIndex, index < scanner.files.count {
                 let file = scanner.files[index]
-                Text("Delete \"\(file.name)\" (\(file.formattedSize))?\n\nThis cannot be undone.")
+                Text("Move \"\(file.name)\" (\(file.formattedSize)) to the Trash?\n\nYou can restore it from the Trash later.")
             }
         }
-        .alert("Batch Delete", isPresented: $showBatchDeleteConfirm) {
+        .alert("Move to Trash", isPresented: $showBatchDeleteConfirm) {
             Button("Cancel", role: .cancel) { }
-            Button("Delete All", role: .destructive) {
+            Button("Move All to Trash", role: .destructive) {
                 performBatchDelete()
             }
         } message: {
             let count = markedFiles.count
             let totalSize = markedTotalSize()
-            Text("Delete \(count) selected files (\(formattedBytes(totalSize)))?\n\nThis cannot be undone.")
+            Text("Move \(count) selected files (\(formattedBytes(totalSize))) to the Trash?\n\nYou can restore them from the Trash later.")
         }
         .alert("Result", isPresented: $showAlert) {
             Button("OK") { alertMessage = nil }
@@ -119,6 +145,19 @@ struct MainWindowView: View {
 
             Spacer()
 
+            // Files / Folders mode toggle
+            if scanner.rootPath != nil {
+                Picker("", selection: $browseMode) {
+                    ForEach(BrowseMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.mini)
+                .frame(width: 130)
+                .help("Switch between largest-files list and folder drill-down")
+            }
+
             // Batch delete button (visible when files are marked)
             if !markedFiles.isEmpty {
                 Button {
@@ -127,7 +166,7 @@ struct MainWindowView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "trash.fill")
                             .font(.system(size: 10))
-                        Text("Delete \(markedFiles.count)")
+                        Text("Trash \(markedFiles.count)")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .foregroundStyle(.white)
@@ -139,7 +178,7 @@ struct MainWindowView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help("Delete \(markedFiles.count) selected files")
+                .help("Move \(markedFiles.count) selected files to the Trash")
             }
 
             // Toolbar buttons
@@ -297,12 +336,21 @@ struct MainWindowView: View {
             // Left: Treemap
             VStack(spacing: 0) {
                 treemapHeader
-                TreemapView(
-                    files: scanner.files,
-                    selectedIndex: selectedIndex,
-                    onSelect: { selectedIndex = $0 },
-                    onDelete: { confirmDelete(at: $0) }
-                )
+                if browseMode == .folders {
+                    TreemapView(
+                        files: folderTreemapEntries,
+                        selectedIndex: selectedFolderTreemapIndex,
+                        onSelect: { handleFolderTreemapSelect($0) },
+                        onDelete: { handleFolderTreemapDelete($0) }
+                    )
+                } else {
+                    TreemapView(
+                        files: scanner.files,
+                        selectedIndex: selectedIndex,
+                        onSelect: { selectedIndex = $0 },
+                        onDelete: { confirmDelete(at: $0) }
+                    )
+                }
             }
 
             // Divider
@@ -310,30 +358,100 @@ struct MainWindowView: View {
                 .fill(Color.white.opacity(0.1))
                 .frame(width: 1)
 
-            // Right: File list
+            // Right: File list or folder browser
             VStack(spacing: 0) {
-                fileListHeader
+                if browseMode == .folders {
+                    fileListHeader
+                    FolderBrowserView(
+                        scanner: scanner,
+                        currentDir: $currentDir,
+                        selectedItemID: $selectedFolderItemID,
+                        items: folderItems,
+                        onQuickLook: { previewURL = $0 },
+                        onTrashFile: { trashFile(withID: $0) }
+                    )
+                } else {
+                    fileListHeader
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(scanner.files.enumerated()), id: \.element.id) { index, file in
-                                fileRow(file: file, index: index)
-                                    .id(file.id)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(scanner.files.enumerated()), id: \.element.id) { index, file in
+                                    fileRow(file: file, index: index)
+                                        .id(file.id)
+                                }
                             }
                         }
-                    }
-                    .onChange(of: selectedIndex) { _, newValue in
-                        if let idx = newValue, idx < scanner.files.count {
-                            let fileId = scanner.files[idx].id
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                proxy.scrollTo(fileId, anchor: .center)
+                        .onChange(of: selectedIndex) { _, newValue in
+                            if let idx = newValue, idx < scanner.files.count {
+                                let fileId = scanner.files[idx].id
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    proxy.scrollTo(fileId, anchor: .center)
+                                }
                             }
                         }
                     }
                 }
             }
             .frame(minWidth: 280, idealWidth: 380)
+        }
+    }
+
+    // MARK: - Folder mode helpers
+
+    private var selectedFolderTreemapIndex: Int? {
+        guard let id = selectedFolderItemID else { return nil }
+        return folderItems.firstIndex(where: { $0.id == id })
+    }
+
+    private func handleFolderTreemapSelect(_ index: Int) {
+        guard index < folderItems.count else { return }
+        let item = folderItems[index]
+        if item.isDirectory {
+            currentDir = item.url
+            selectedFolderItemID = nil
+        } else {
+            selectedFolderItemID = item.id
+        }
+    }
+
+    private func handleFolderTreemapDelete(_ index: Int) {
+        guard index < folderItems.count else { return }
+        let item = folderItems[index]
+        if !item.isDirectory, let fileID = item.fileID {
+            trashFile(withID: fileID)
+        }
+    }
+
+    private func trashFile(withID fileID: UUID) {
+        if let index = scanner.files.firstIndex(where: { $0.id == fileID }) {
+            confirmDelete(at: index)
+        }
+    }
+
+    private func rebuildFolderItems() {
+        guard browseMode == .folders, let root = scanner.rootPath else {
+            folderItems = []
+            folderTreemapEntries = []
+            return
+        }
+        if currentDir == nil || !(currentDir!.path + "/").hasPrefix(root.path == "/" ? "/" : root.path + "/") && currentDir!.path != root.path {
+            currentDir = root
+        }
+        guard let dir = currentDir else { return }
+
+        let dirs = scanner.childDirectories(of: dir).map {
+            FolderItem(url: $0.url, size: $0.size, isDirectory: true)
+        }
+        let fileItems = scanner.childFiles(of: dir).map {
+            FolderItem(url: $0.path, size: $0.size, isDirectory: false, fileID: $0.id)
+        }
+        let combined = (dirs + fileItems).sorted { $0.size > $1.size }
+        folderItems = combined
+        folderTreemapEntries = combined.map { FileEntry(path: $0.url, size: $0.size) }
+
+        if let id = selectedFolderItemID, !combined.contains(where: { $0.id == id }) {
+            selectedFolderItemID = nil
         }
     }
 
@@ -473,7 +591,7 @@ struct MainWindowView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.red.opacity(0.4))
-            .help("Delete")
+            .help("Move to Trash")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
@@ -499,17 +617,63 @@ struct MainWindowView: View {
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([file.path])
             }
+            Button("Quick Look") {
+                previewURL = file.path
+            }
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(file.path.path, forType: .string)
             }
             Divider()
             if !markedFiles.isEmpty {
-                Button("Delete \(markedFiles.count) Selected Files", role: .destructive) {
+                Button("Move \(markedFiles.count) Selected Files to Trash", role: .destructive) {
                     showBatchDeleteConfirm = true
                 }
             }
-            Button("Delete", role: .destructive) { confirmDelete(at: index) }
+            Button("Move to Trash", role: .destructive) { confirmDelete(at: index) }
+        }
+    }
+
+    // MARK: - Permission Banner
+
+    private var permissionBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 11))
+                .foregroundStyle(.yellow.opacity(0.8))
+
+            Text("\(scanner.permissionDeniedCount) items couldn't be read due to permissions. Grant Full Disk Access for complete results.")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer()
+
+            Button {
+                openFullDiskAccessSettings()
+            } label: {
+                Text("Grant Full Disk Access")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.black.opacity(0.8))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.yellow.opacity(0.8))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Open System Settings > Privacy & Security > Full Disk Access")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color.yellow.opacity(0.08))
+    }
+
+    private func openFullDiskAccessSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -558,7 +722,7 @@ struct MainWindowView: View {
                     .lineLimit(1)
             }
 
-            Text("↑↓ nav  ⌘+click select  ⌫ delete")
+            Text("↑↓ nav  ⌘+click select  ⌫ trash  ⌘Y quick look")
                 .font(.system(size: 9))
                 .foregroundStyle(.white.opacity(0.15))
         }
@@ -576,6 +740,39 @@ struct MainWindowView: View {
             if showDeleteConfirm || showBatchDeleteConfirm || showAlert { return event }
 
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // Folder drill-down mode has its own navigation
+            if browseMode == .folders {
+                switch event.keyCode {
+                case 125, 38: // down, j
+                    moveFolderSelection(by: 1); return nil
+                case 126, 40: // up, k
+                    moveFolderSelection(by: -1); return nil
+                case 36: // return — descend into folder / quick look file
+                    if let item = selectedFolderItem() {
+                        if item.isDirectory {
+                            currentDir = item.url
+                            selectedFolderItemID = nil
+                        } else {
+                            previewURL = item.url
+                        }
+                    }
+                    return nil
+                case 51, 117: // delete — trash selected file
+                    if let item = selectedFolderItem(), !item.isDirectory, let fileID = item.fileID {
+                        trashFile(withID: fileID)
+                    }
+                    return nil
+                case 123: // left arrow — go up
+                    if let dir = currentDir, let root = scanner.rootPath, dir.path != root.path {
+                        currentDir = dir.deletingLastPathComponent()
+                        selectedFolderItemID = nil
+                    }
+                    return nil
+                default:
+                    return event
+                }
+            }
 
             switch event.keyCode {
             case 125, 38: // down arrow, j
@@ -602,9 +799,30 @@ struct MainWindowView: View {
                     selectAll(); return nil
                 }
                 return event
+            case 16: // y
+                if modifiers.contains(.command) {
+                    // Cmd+Y = Quick Look (standard Finder shortcut)
+                    quickLookSelected(); return nil
+                }
+                return event
             default:
                 return event
             }
+        }
+    }
+
+    private func selectedFolderItem() -> FolderItem? {
+        guard let id = selectedFolderItemID else { return nil }
+        return folderItems.first(where: { $0.id == id })
+    }
+
+    private func moveFolderSelection(by delta: Int) {
+        guard !folderItems.isEmpty else { return }
+        if let id = selectedFolderItemID, let current = folderItems.firstIndex(where: { $0.id == id }) {
+            let newIndex = max(0, min(folderItems.count - 1, current + delta))
+            selectedFolderItemID = folderItems[newIndex].id
+        } else {
+            selectedFolderItemID = delta > 0 ? folderItems.first?.id : folderItems.last?.id
         }
     }
 
@@ -625,6 +843,11 @@ struct MainWindowView: View {
         } else if let idx = selectedIndex, idx < scanner.files.count {
             confirmDelete(at: idx)
         }
+    }
+
+    private func quickLookSelected() {
+        guard let idx = selectedIndex, idx < scanner.files.count else { return }
+        previewURL = scanner.files[idx].path
     }
 
     private func handleRevealKey() {
@@ -695,6 +918,10 @@ struct MainWindowView: View {
     private func startScan(url: URL) {
         selectedIndex = nil
         markedFiles.removeAll()
+        currentDir = url
+        selectedFolderItemID = nil
+        folderItems = []
+        folderTreemapEntries = []
         scanner.startScan(path: url, minSize: 0, topN: 500)
     }
 
@@ -737,7 +964,7 @@ struct MainWindowView: View {
         markedFiles.removeAll()
 
         if result.failCount > 0 {
-            alertMessage = "Deleted \(result.successCount) files (\(formattedBytes(result.totalFreed)) freed), \(result.failCount) failed"
+            alertMessage = "Moved \(result.successCount) files to Trash (\(formattedBytes(result.totalFreed)) freed), \(result.failCount) failed"
             if let error = result.firstError {
                 alertMessage! += " — \(error)"
             }

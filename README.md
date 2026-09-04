@@ -8,11 +8,16 @@ A fast disk usage analyzer inspired by [GrandPerspective](https://grandperspecti
 
 ## Features
 
-- **Native macOS app** — beautiful GUI with drag-and-drop folder scanning
-- **Fast CLI tool** — recursively walks directories using `walkdir`
-- **Interactive TUI** — treemap visualization + scrollable file list powered by `ratatui`
-- **List mode** — non-interactive output for scripting and quick checks
-- **Configurable** — filter by minimum file size, limit number of results
+- **Native macOS app** — beautiful GUI with drag-and-drop folder scanning, Trash-safe deletes, Quick Look
+- **Fast CLI tool** — parallel directory walking with `jwalk`, hardlink-aware
+- **Interactive TUI** — treemap visualization + scrollable file list powered by `ratatui`, with mouse support
+- **Directory drill-down** — `t` opens a tree view; descend into directories to find heavy folders
+- **Duplicate detection** — `u` finds identical files (size + BLAKE3 hash) and shows reclaimable space
+- **Trash-safe deletes** — `d` moves to Trash (recoverable); `X` deletes permanently
+- **File-type coloring** — treemap and list colored by category (video, archive, code, ...)
+- **Search** — `/` filters the file list as you type
+- **List mode** — non-interactive output for scripting; `--format json` / `--format csv` for machine-readable export
+- **Configurable** — min file size, top N, `--exclude` globs, `--one-file-system`, `--du` for real disk usage
 
 ## Install
 
@@ -50,6 +55,10 @@ Options:
   -m, --min-size <MIN_SIZE>  Minimum file size to show [default: 1MB]
   -n, --top <TOP>            Show top N largest files [default: 100]
   -l, --list                 Print results and exit (no interactive UI)
+  -f, --format <FORMAT>      Output format for list mode [default: table] [possible values: table, json, csv]
+      --du                   Report actual disk usage (allocated blocks) instead of apparent size
+  -e, --exclude <EXCLUDE>    Exclude paths matching a glob pattern (repeatable)
+  -x, --one-file-system      Stay on one filesystem (don't cross mount points)
   -h, --help                 Print help
   -V, --version              Print version
 ```
@@ -71,7 +80,18 @@ Opens a terminal UI with a treemap visualization and a scrollable file list sort
 | `Page Up` / `Page Down` | Scroll fast |
 | `Home` / `End` | Jump to top / bottom |
 | `Tab` | Toggle treemap view |
-| `q` / `Esc` | Quit |
+| `Space` | Mark/unmark file for batch operations |
+| `a` / `A` | Mark all / unmark all |
+| `d` | Move selected (or marked) files to Trash |
+| `X` | Permanently delete selected (or marked) files |
+| `/` | Search / filter the file list |
+| `t` | Toggle directory drill-down (tree) view |
+| `Enter` | Tree view: descend into directory; otherwise file info |
+| `Backspace` | Tree view: go up a directory |
+| `u` | Toggle duplicate finder (size + BLAKE3 hash) |
+| `o` | Reveal selected file in Finder / file manager |
+| Mouse | Click to select (list or treemap), scroll wheel to navigate |
+| `q` / `Esc` | Quit (Esc first clears search / leaves sub-views) |
 
 ### List mode
 

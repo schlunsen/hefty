@@ -41,11 +41,11 @@ struct ContentView: View {
             StatusBarView(scanner: scanner, selectedIndex: selectedIndex)
         }
         .frame(minWidth: 800, minHeight: 500)
-        .alert("Delete File", isPresented: $showDeleteConfirm) {
+        .alert("Move to Trash", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {
                 deleteTargetIndex = nil
             }
-            Button("Delete", role: .destructive) {
+            Button("Move to Trash", role: .destructive) {
                 if let index = deleteTargetIndex {
                     performDelete(at: index)
                 }
@@ -53,7 +53,7 @@ struct ContentView: View {
         } message: {
             if let index = deleteTargetIndex, index < scanner.files.count {
                 let file = scanner.files[index]
-                Text("Delete \"\(file.name)\" (\(file.formattedSize))?\n\nThis cannot be undone.")
+                Text("Move \"\(file.name)\" (\(file.formattedSize)) to the Trash?\n\nYou can restore it from the Trash later.")
             }
         }
         .alert("Result", isPresented: $showAlert) {

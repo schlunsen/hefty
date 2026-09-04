@@ -1,10 +1,13 @@
 import SwiftUI
+import QuickLook
 
 struct FileListView: View {
     let files: [FileEntry]
     let rootPath: URL?
     @Binding var selectedIndex: Int?
     let onDelete: (Int) -> Void
+
+    @State private var previewURL: URL? = nil
 
     private static let colors: [Color] = [
         .blue, .green, .yellow, .cyan, .purple, .red,
@@ -35,13 +38,22 @@ struct FileListView: View {
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([file.path])
                     }
-                    Button("Delete", role: .destructive) {
+                    Button("Quick Look") {
+                        previewURL = file.path
+                    }
+                    Button("Move to Trash", role: .destructive) {
                         onDelete(index)
                     }
                 }
             }
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
+        .quickLookPreview($previewURL)
+        .onKeyPress(.space) {
+            guard let idx = selectedIndex, files.indices.contains(idx) else { return .ignored }
+            previewURL = files[idx].path
+            return .handled
+        }
     }
 
     private func relativePath(for file: FileEntry) -> String {

@@ -12,6 +12,11 @@ final class FileScanner {
     var rootPath: URL?
     var deletedBytes: UInt64 = 0
     var deletedCount: Int = 0
+    var permissionDeniedCount: Int = 0
+    /// Aggregated size of every directory under the root (keyed by path).
+    var dirSizes: [String: UInt64] = [:]
+    /// Bumped whenever dirSizes is republished, so views can cheaply observe changes.
+    var dirSizesVersion: Int = 0
 
     private var scanTask: Task<Void, Never>?
     private var topN: Int = 100
@@ -30,6 +35,9 @@ final class FileScanner {
         rootPath = path
         deletedBytes = 0
         deletedCount = 0
+        permissionDeniedCount = 0
+        dirSizes = [:]
+        dirSizesVersion = 0
         self.topN = topN
         self.minSize = minSize
 
@@ -53,18 +61,18 @@ final class FileScanner {
         let size = file.size
 
         do {
-            try FileManager.default.removeItem(at: file.path)
+            try FileManager.default.trashItem(at: file.path, resultingItemURL: nil)
             deletedBytes += size
             deletedCount += 1
             totalSize = totalSize >= size ? totalSize - size : 0
             files.remove(at: index)
-            return (true, "Deleted \(name) (freed \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))")
+            return (true, "Moved \(name) to Trash (freed \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))")
         } catch {
-            return (false, "Error deleting \(name): \(error.localizedDescription)")
+            return (false, "Error moving \(name) to Trash: \(error.localizedDescription)")
         }
     }
 
-    /// Delete multiple files at the given indices. Returns summary.
+    /// Move multiple files at the given indices to the Trash. Returns summary.
     func deleteFiles(at indices: [Int]) -> (successCount: Int, failCount: Int, totalFreed: UInt64, firstError: String?) {
         // Sort descending so removal doesn't shift indices
         let sortedIndices = indices.sorted(by: >)
@@ -80,7 +88,7 @@ final class FileScanner {
 
             let file = files[index]
             do {
-                try FileManager.default.removeItem(at: file.path)
+                try FileManager.default.trashItem(at: file.path, resultingItemURL: nil)
                 deletedBytes += file.size
                 deletedCount += 1
                 totalSize = totalSize >= file.size ? totalSize - file.size : 0
@@ -90,7 +98,7 @@ final class FileScanner {
             } catch {
                 failCount += 1
                 if firstError == nil {
-                    firstError = "Error deleting \(file.name): \(error.localizedDescription)"
+                    firstError = "Error moving \(file.name) to Trash: \(error.localizedDescription)"
                 }
             }
         }
@@ -109,10 +117,20 @@ final class FileScanner {
         let fileManager = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
 
+        let deniedCounter = PermissionDeniedCounter()
+
         guard let enumerator = fileManager.enumerator(
             at: path,
             includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, error in
+                let nsError = error as NSError
+                if (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError)
+                    || (nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(EACCES) || nsError.code == Int(EPERM))) {
+                    deniedCounter.count += 1
+                }
+                return true // continue scanning past errors
+            }
         ) else {
             await MainActor.run { self.scanning = false }
             return
@@ -122,6 +140,9 @@ final class FileScanner {
         var localTotalBytes: UInt64 = 0
         var batch: [FileEntry] = []
         let batchSize = 50
+        var localDirSizes: [String: UInt64] = [:]
+        var lastDirPublish: UInt64 = 0
+        let rootPathStr = path.path
 
         for case let fileURL as URL in enumerator {
             if Task.isCancelled { break }
@@ -138,6 +159,16 @@ final class FileScanner {
                 localTotalBytes = localTotalBytes &+ size
                 localFileCount += 1
 
+                // Aggregate per-directory totals up to the scan root
+                var dir = fileURL.deletingLastPathComponent()
+                while true {
+                    localDirSizes[dir.path, default: 0] &+= size
+                    if dir.path == rootPathStr || dir.path == "/" { break }
+                    let parent = dir.deletingLastPathComponent()
+                    if parent.path == dir.path { break }
+                    dir = parent
+                }
+
                 if size >= minSize {
                     batch.append(FileEntry(path: fileURL, size: size))
                 }
@@ -150,6 +181,15 @@ final class FileScanner {
                     let limit = self.topN
                     batch = []
 
+                    // Publish directory sizes every ~2000 files (dict copy is not free)
+                    let dirSnapshot: [String: UInt64]?
+                    if localFileCount - lastDirPublish >= 2000 {
+                        dirSnapshot = localDirSizes
+                        lastDirPublish = localFileCount
+                    } else {
+                        dirSnapshot = nil
+                    }
+
                     await MainActor.run {
                         for entry in currentBatch {
                             self.insertSorted(entry: entry)
@@ -160,6 +200,11 @@ final class FileScanner {
                         }
                         self.scanFileCount = count
                         self.scanTotalBytes = bytes
+                        self.permissionDeniedCount = deniedCounter.count
+                        if let dirSnapshot {
+                            self.dirSizes = dirSnapshot
+                            self.dirSizesVersion += 1
+                        }
                     }
                 }
             } catch {
@@ -183,11 +228,38 @@ final class FileScanner {
 
         let finalCount = localFileCount
         let finalBytes = localTotalBytes
+        let finalDirSizes = localDirSizes
         await MainActor.run {
             self.scanFileCount = finalCount
             self.scanTotalBytes = finalBytes
+            self.permissionDeniedCount = deniedCounter.count
+            self.dirSizes = finalDirSizes
+            self.dirSizesVersion += 1
             self.scanning = false
         }
+    }
+
+    // MARK: - Folder browsing helpers
+
+    /// Immediate subdirectories of `dir` with their aggregated sizes, largest first.
+    func childDirectories(of dir: URL) -> [(url: URL, size: UInt64)] {
+        let dirPath = dir.path
+        let prefix = dirPath.hasSuffix("/") ? dirPath : dirPath + "/"
+        var result: [(url: URL, size: UInt64)] = []
+        for (path, size) in dirSizes {
+            guard path.hasPrefix(prefix) else { continue }
+            let rest = path.dropFirst(prefix.count)
+            if !rest.isEmpty && !rest.contains("/") {
+                result.append((URL(fileURLWithPath: path, isDirectory: true), size))
+            }
+        }
+        return result.sorted { $0.size > $1.size }
+    }
+
+    /// Known large files directly inside `dir`, largest first (from the top-N list).
+    func childFiles(of dir: URL) -> [FileEntry] {
+        let dirPath = dir.path
+        return files.filter { $0.path.deletingLastPathComponent().path == dirPath }
     }
 
     /// Insert a file entry in sorted position (largest first)
@@ -195,4 +267,9 @@ final class FileScanner {
         let index = files.firstIndex(where: { $0.size < entry.size }) ?? files.count
         files.insert(entry, at: index)
     }
+}
+
+/// Reference box for counting permission-denied paths from the enumerator's error handler.
+private final class PermissionDeniedCounter {
+    var count = 0
 }
