@@ -25,6 +25,30 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 
 const DIR_COLOR: Color = Color::LightBlue;
 
+/// Palette used to color top-level groups in the grouped treemap.
+const GROUP_COLORS: &[Color] = &[
+    Color::Blue,
+    Color::Green,
+    Color::Yellow,
+    Color::Cyan,
+    Color::Magenta,
+    Color::Red,
+    Color::LightBlue,
+    Color::LightGreen,
+    Color::LightYellow,
+    Color::LightCyan,
+    Color::LightMagenta,
+    Color::LightRed,
+];
+
+fn group_color(name: &str) -> Color {
+    let mut hash: usize = 0;
+    for b in name.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(b as usize);
+    }
+    GROUP_COLORS[hash % GROUP_COLORS.len()]
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Dialog {
     None,
@@ -96,6 +120,8 @@ pub struct App {
     dupe_rows: Vec<DupeRow>,
     dupe_progress: (usize, usize),
     hashing: bool,
+    // Treemap grouping (GrandPerspective-style hierarchical layout)
+    grouped: bool,
     // Mouse hit areas from the last draw
     list_inner: Rect,
     treemap_hits: Vec<(Rect, usize)>,
@@ -139,6 +165,7 @@ impl App {
             dupe_rows: Vec::new(),
             dupe_progress: (0, 0),
             hashing: false,
+            grouped: true,
             list_inner: Rect::default(),
             treemap_hits: Vec::new(),
             needs_redraw: true,
@@ -552,6 +579,7 @@ impl App {
                 }
             }
             KeyCode::Tab => self.show_treemap = !self.show_treemap,
+            KeyCode::Char('g') => self.grouped = !self.grouped,
             KeyCode::Char('/') => {
                 if self.view == ViewMode::Files {
                     self.search_input = true;
@@ -956,12 +984,327 @@ fn treemap_items(app: &App) -> Vec<(String, u64, Color)> {
     }
 }
 
+// ── Grouped (GrandPerspective-style) treemap ────────────────────────────
+
+/// A pre-tree input item: path components relative to the view root.
+struct GItem {
+    comps: Vec<String>,
+    size: u64,
+    hit_idx: Option<usize>,
+    is_filler: bool,
+}
+
+enum GKind {
+    Leaf {
+        hit_idx: Option<usize>,
+        is_filler: bool,
+    },
+    Dir {
+        children: Vec<GNode>,
+        rep_hit: Option<usize>,
+    },
+}
+
+struct GNode {
+    name: String,
+    size: u64,
+    kind: GKind,
+}
+
+fn build_gtree(items: Vec<GItem>) -> Vec<GNode> {
+    let mut nodes: Vec<GNode> = Vec::new();
+    let mut dirs: HashMap<String, Vec<GItem>> = HashMap::new();
+
+    for mut it in items {
+        if it.comps.len() <= 1 {
+            let name = it.comps.pop().unwrap_or_default();
+            nodes.push(GNode {
+                name,
+                size: it.size,
+                kind: GKind::Leaf {
+                    hit_idx: it.hit_idx,
+                    is_filler: it.is_filler,
+                },
+            });
+        } else {
+            let first = it.comps.remove(0);
+            dirs.entry(first).or_default().push(it);
+        }
+    }
+
+    for (name, children_items) in dirs {
+        let size = children_items.iter().map(|i| i.size).sum();
+        let rep_hit = children_items.iter().find_map(|i| i.hit_idx);
+        let children = build_gtree(children_items);
+        nodes.push(GNode {
+            name,
+            size,
+            kind: GKind::Dir { children, rep_hit },
+        });
+    }
+
+    nodes.sort_by_key(|n| std::cmp::Reverse(n.size));
+    nodes
+}
+
+impl App {
+    /// Items for the grouped treemap in the current view.
+    fn grouped_items(&self) -> Vec<GItem> {
+        match self.view {
+            ViewMode::Files => self
+                .visible
+                .iter()
+                .enumerate()
+                .filter_map(|(di, &fi)| {
+                    let f = &self.scan.files[fi];
+                    let rel = f.path.strip_prefix(&self.scan.root).ok()?;
+                    let comps: Vec<String> = rel
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy().to_string())
+                        .collect();
+                    if comps.is_empty() {
+                        return None;
+                    }
+                    Some(GItem {
+                        comps,
+                        size: f.size,
+                        hit_idx: Some(di),
+                        is_filler: false,
+                    })
+                })
+                .collect(),
+            ViewMode::Tree => {
+                let mut items: Vec<GItem> = Vec::new();
+                let mut known_per_entry: HashMap<usize, u64> = HashMap::new();
+
+                for f in &self.scan.files {
+                    let Ok(rel) = f.path.strip_prefix(&self.current_dir) else {
+                        continue;
+                    };
+                    let comps: Vec<String> = rel
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy().to_string())
+                        .collect();
+                    if comps.is_empty() {
+                        continue;
+                    }
+                    // Map to the tree entry for this file's top-level component
+                    let hit_idx = self.tree_entries.iter().position(|e| e.name == comps[0]);
+                    if let Some(idx) = hit_idx {
+                        *known_per_entry.entry(idx).or_insert(0) += f.size;
+                    }
+                    items.push(GItem {
+                        comps,
+                        size: f.size,
+                        hit_idx,
+                        is_filler: false,
+                    });
+                }
+
+                // Filler blocks for the part of each directory we didn't list
+                // (files below min-size); keeps folder areas proportional.
+                for (idx, entry) in self.tree_entries.iter().enumerate() {
+                    if entry.is_dir {
+                        let known = known_per_entry.get(&idx).copied().unwrap_or(0);
+                        let filler = entry.size.saturating_sub(known);
+                        if filler > 0 {
+                            items.push(GItem {
+                                comps: vec![entry.name.clone(), "…".to_string()],
+                                size: filler,
+                                hit_idx: Some(idx),
+                                is_filler: true,
+                            });
+                        }
+                    }
+                }
+                items
+            }
+            ViewMode::Dupes => Vec::new(),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_gnodes(
+    nodes: &[GNode],
+    area: Rect,
+    bounds: Rect,
+    depth: usize,
+    parent_color: Color,
+    selected_hit: Option<usize>,
+    marked: &HashSet<usize>,
+    buf: &mut ratatui::buffer::Buffer,
+    hits: &mut Vec<(Rect, usize)>,
+) {
+    if nodes.is_empty() || area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let sizes: Vec<u64> = nodes.iter().map(|n| n.size).collect();
+    let rects = treemap::layout(&sizes, area.width as f64, area.height as f64);
+
+    for r in &rects {
+        let node = &nodes[r.index];
+        let rx = area.x + r.x as u16;
+        let ry = area.y + r.y as u16;
+        let rw = (r.w as u16).max(1);
+        let rh = (r.h as u16).max(1);
+        let x_end = rx.saturating_add(rw).min(bounds.x + bounds.width);
+        let y_end = ry.saturating_add(rh).min(bounds.y + bounds.height);
+        if rx >= x_end || ry >= y_end {
+            continue;
+        }
+        let cell_rect = Rect::new(rx, ry, x_end - rx, y_end - ry);
+
+        match &node.kind {
+            GKind::Leaf { hit_idx, is_filler } => {
+                let base = if *is_filler {
+                    Color::DarkGray
+                } else if depth == 0 {
+                    group_color(&node.name)
+                } else {
+                    parent_color
+                };
+                let is_selected = hit_idx.is_some() && *hit_idx == selected_hit;
+                let is_marked = hit_idx.map(|h| marked.contains(&h)).unwrap_or(false);
+
+                let style = if is_selected {
+                    Style::default()
+                        .bg(Color::White)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD)
+                } else if is_marked {
+                    Style::default()
+                        .bg(Color::Magenta)
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().bg(base).fg(Color::Black)
+                };
+
+                fill_cells(buf, cell_rect, style);
+                if !is_filler && cell_rect.width >= 4 {
+                    overlay_label(buf, cell_rect, &node.name, Some(style));
+                }
+                if let Some(h) = hit_idx {
+                    hits.push((cell_rect, *h));
+                }
+            }
+            GKind::Dir { children, rep_hit } => {
+                let my_color = group_color(&node.name);
+                if cell_rect.width < 6 || cell_rect.height < 3 || depth >= 4 {
+                    // Too small to subdivide: draw as a solid block
+                    let style = Style::default().bg(my_color).fg(Color::Black);
+                    fill_cells(buf, cell_rect, style);
+                    if cell_rect.width >= 4 {
+                        overlay_label(buf, cell_rect, &format!("{}/", node.name), Some(style));
+                    }
+                    if let Some(h) = rep_hit {
+                        hits.push((cell_rect, *h));
+                    }
+                } else {
+                    draw_gnodes(
+                        children,
+                        cell_rect,
+                        bounds,
+                        depth + 1,
+                        my_color,
+                        selected_hit,
+                        marked,
+                        buf,
+                        hits,
+                    );
+                    // Overlay the folder name on the top-left of its region,
+                    // keeping the underlying block colors visible.
+                    overlay_label(buf, cell_rect, &format!("▸{}/", node.name), None);
+                }
+            }
+        }
+    }
+}
+
+fn fill_cells(buf: &mut ratatui::buffer::Buffer, rect: Rect, style: Style) {
+    for y in rect.y..rect.y + rect.height {
+        for x in rect.x..rect.x + rect.width {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_style(style);
+                cell.set_char(' ');
+            }
+        }
+    }
+}
+
+/// Write a truncated label on the first row of a rect. With `style` the cells
+/// take that full style; with None only the characters are replaced so the
+/// underlying block colors remain.
+fn overlay_label(buf: &mut ratatui::buffer::Buffer, rect: Rect, text: &str, style: Option<Style>) {
+    let max = rect.width.saturating_sub(1) as usize;
+    if max == 0 {
+        return;
+    }
+    let label = truncate_label(text, max);
+    for (i, ch) in label.chars().enumerate() {
+        let x = rect.x + i as u16;
+        if x >= rect.x + rect.width {
+            break;
+        }
+        if let Some(cell) = buf.cell_mut((x, rect.y)) {
+            cell.set_char(ch);
+            if let Some(s) = style {
+                cell.set_style(s);
+            } else {
+                cell.set_style(
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+        }
+    }
+}
+
+fn draw_grouped_treemap(app: &mut App, frame: &mut Frame, inner: Rect) {
+    let items = app.grouped_items();
+    if items.is_empty() {
+        return;
+    }
+    let nodes = build_gtree(items);
+
+    let selected_hit = Some(app.selected);
+    let marked_display: HashSet<usize> = match app.view {
+        ViewMode::Files => app
+            .visible
+            .iter()
+            .enumerate()
+            .filter(|(_, &fi)| app.marked.contains(&fi))
+            .map(|(di, _)| di)
+            .collect(),
+        _ => HashSet::new(),
+    };
+
+    let mut hits = Vec::new();
+    draw_gnodes(
+        &nodes,
+        inner,
+        inner,
+        0,
+        Color::Gray,
+        selected_hit,
+        &marked_display,
+        frame.buffer_mut(),
+        &mut hits,
+    );
+    app.treemap_hits = hits;
+}
+
 fn draw_treemap(app: &mut App, frame: &mut Frame, area: Rect) {
     let title = if app.scanning {
         let spinner = SPINNER[app.spinner_tick % SPINNER.len()];
         format!(" {} Treemap (scanning...) ", spinner)
+    } else if app.grouped {
+        " Treemap · grouped (g flat, Tab hide) ".to_string()
     } else {
-        " Treemap (Tab to toggle) ".to_string()
+        " Treemap · flat (g group, Tab hide) ".to_string()
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
@@ -969,8 +1312,17 @@ fn draw_treemap(app: &mut App, frame: &mut Frame, area: Rect) {
 
     app.treemap_hits.clear();
 
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    if app.grouped && app.view != ViewMode::Dupes {
+        draw_grouped_treemap(app, frame, inner);
+        return;
+    }
+
     let items = treemap_items(app);
-    if items.is_empty() || inner.width == 0 || inner.height == 0 {
+    if items.is_empty() {
         return;
     }
 
@@ -1277,9 +1629,9 @@ fn draw_status_bar(app: &App, frame: &mut Frame, area: Rect) {
 
     let keys = match app.view {
         ViewMode::Files => {
-            "│ Space mark  d trash  X del  / find  t tree  u dupes  o reveal  q quit"
+            "│ Space mark  d trash  X del  / find  t tree  u dupes  g group  o reveal  q quit"
         }
-        ViewMode::Tree => "│ Enter open  Backspace up  d trash  o reveal  t back  q quit",
+        ViewMode::Tree => "│ Enter open  Backspace up  d trash  g group  o reveal  t back  q quit",
         ViewMode::Dupes => "│ d trash  o reveal  u back  q quit",
     };
 

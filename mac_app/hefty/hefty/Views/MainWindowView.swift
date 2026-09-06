@@ -22,6 +22,8 @@ struct MainWindowView: View {
     @State private var folderItems: [FolderItem] = []
     @State private var folderTreemapEntries: [FileEntry] = []
     @State private var selectedFolderItemID: UUID? = nil
+    @State private var treemapSelectedPath: String? = nil
+    @State private var treemapHoveredPath: String? = nil
 
     enum BrowseMode: String, CaseIterable {
         case files = "Files"
@@ -67,8 +69,19 @@ struct MainWindowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear { setupKeyboardMonitor() }
         .quickLookPreview($previewURL)
-        .onChange(of: currentDir) { _, _ in rebuildFolderItems() }
+        .onChange(of: currentDir) { _, _ in
+            treemapSelectedPath = nil
+            treemapHoveredPath = nil
+            rebuildFolderItems()
+        }
         .onChange(of: browseMode) { _, _ in rebuildFolderItems() }
+        .onChange(of: treemapSelectedPath) { _, newValue in
+            // Mirror treemap selection into the folder list when possible.
+            guard let path = newValue else { return }
+            if let item = folderItems.first(where: { $0.url.path == path }) {
+                selectedFolderItemID = item.id
+            }
+        }
         .onChange(of: scanner.dirSizesVersion) { _, _ in rebuildFolderItems() }
         .onChange(of: scanner.files.count) { _, _ in
             if browseMode == .folders { rebuildFolderItems() }
@@ -337,12 +350,25 @@ struct MainWindowView: View {
             VStack(spacing: 0) {
                 treemapHeader
                 if browseMode == .folders {
-                    TreemapView(
-                        files: folderTreemapEntries,
-                        selectedIndex: selectedFolderTreemapIndex,
-                        onSelect: { handleFolderTreemapSelect($0) },
-                        onDelete: { handleFolderTreemapDelete($0) }
-                    )
+                    if let dir = currentDir, let node = scanner.fullTreeNode(for: dir) {
+                        // Full grouped treemap: every scanned file, grouped by folder.
+                        GroupedTreemapView(
+                            rootNode: node,
+                            rootURL: dir,
+                            treeVersion: scanner.fullTreeVersion,
+                            currentDir: $currentDir,
+                            selectedPath: $treemapSelectedPath,
+                            hoveredPath: $treemapHoveredPath
+                        )
+                    } else {
+                        // Fallback while the full tree is still being built.
+                        TreemapView(
+                            files: folderTreemapEntries,
+                            selectedIndex: selectedFolderTreemapIndex,
+                            onSelect: { handleFolderTreemapSelect($0) },
+                            onDelete: { handleFolderTreemapDelete($0) }
+                        )
+                    }
                 } else {
                     TreemapView(
                         files: scanner.files,
@@ -456,12 +482,14 @@ struct MainWindowView: View {
     }
 
     private var treemapHeader: some View {
-        HStack {
+        HStack(spacing: 6) {
             if scanner.scanning {
                 ProgressView()
                     .controlSize(.mini)
                     .tint(.orange)
-                Text("Treemap (scanning...)")
+                Text(browseMode == .folders && scanner.fullTree == nil
+                     ? "Treemap (scanning — building full map...)"
+                     : "Treemap (scanning...)")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange.opacity(0.7))
             } else {
@@ -469,11 +497,49 @@ struct MainWindowView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.4))
             }
+
             Spacer()
+
+            if browseMode == .folders {
+                if let info = treemapPathInfo {
+                    Text(info)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                if let selected = treemapSelectedPath {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: selected)])
+                    } label: {
+                        Image(systemName: "eye")
+                            .font(.system(size: 9))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .help("Reveal selection in Finder")
+                }
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Color(white: 0.06))
+    }
+
+    /// Hovered (preferred) or selected treemap path, relative to the root, with its size.
+    private var treemapPathInfo: String? {
+        guard let path = treemapHoveredPath ?? treemapSelectedPath else { return nil }
+        var display = path
+        if let root = scanner.rootPath, path.hasPrefix(root.path) {
+            let relative = String(path.dropFirst(root.path.count))
+            display = relative.hasPrefix("/") ? String(relative.dropFirst()) : relative
+            if display.isEmpty { display = root.lastPathComponent }
+        }
+        if let size = scanner.sizeOfScannedPath(path) {
+            return "\(display) — \(formattedBytes(size))"
+        }
+        return display
     }
 
     private var fileListHeader: some View {
@@ -922,6 +988,8 @@ struct MainWindowView: View {
         selectedFolderItemID = nil
         folderItems = []
         folderTreemapEntries = []
+        treemapSelectedPath = nil
+        treemapHoveredPath = nil
         scanner.startScan(path: url, minSize: 0, topN: 500)
     }
 

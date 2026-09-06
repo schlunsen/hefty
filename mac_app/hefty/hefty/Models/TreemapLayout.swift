@@ -1,6 +1,6 @@
 import Foundation
 
-struct TreemapRect: Equatable {
+nonisolated struct TreemapRect: Equatable {
     let x: Double
     let y: Double
     let w: Double
@@ -11,7 +11,7 @@ struct TreemapRect: Equatable {
 
 /// Squarified treemap layout algorithm.
 /// Takes a slice of sizes (sorted descending) and a bounding box.
-enum TreemapLayout {
+nonisolated enum TreemapLayout {
     static func layout(sizes: [UInt64], width: Double, height: Double) -> [TreemapRect] {
         if sizes.isEmpty { return [] }
 
