@@ -17,6 +17,11 @@ final class FileScanner {
     var dirSizes: [String: UInt64] = [:]
     /// Bumped whenever dirSizes is republished, so views can cheaply observe changes.
     var dirSizesVersion: Int = 0
+    /// Full tree of every scanned file (not limited by topN/minSize).
+    /// Published once at scan completion; nil while a scan is in progress.
+    var fullTree: ScanNode? = nil
+    /// Bumped whenever fullTree is republished, so views can cheaply observe changes.
+    var fullTreeVersion: Int = 0
 
     private var scanTask: Task<Void, Never>?
     private var topN: Int = 100
@@ -38,6 +43,8 @@ final class FileScanner {
         permissionDeniedCount = 0
         dirSizes = [:]
         dirSizesVersion = 0
+        fullTree = nil
+        fullTreeVersion += 1
         self.topN = topN
         self.minSize = minSize
 
@@ -141,6 +148,8 @@ final class FileScanner {
         var batch: [FileEntry] = []
         let batchSize = 50
         var localDirSizes: [String: UInt64] = [:]
+        /// Files directly inside each directory, for the full-tree build at scan end.
+        var localDirFiles: [String: [ScanFile]] = [:]
         var lastDirPublish: UInt64 = 0
         let rootPathStr = path.path
 
@@ -161,6 +170,9 @@ final class FileScanner {
 
                 // Aggregate per-directory totals up to the scan root
                 var dir = fileURL.deletingLastPathComponent()
+                localDirFiles[dir.path, default: []].append(
+                    ScanFile(name: fileURL.lastPathComponent, size: size)
+                )
                 while true {
                     localDirSizes[dir.path, default: 0] &+= size
                     if dir.path == rootPathStr || dir.path == "/" { break }
@@ -229,14 +241,50 @@ final class FileScanner {
         let finalCount = localFileCount
         let finalBytes = localTotalBytes
         let finalDirSizes = localDirSizes
+        // Build the full tree once from local state and hand it over in one publish.
+        let tree = Task.isCancelled
+            ? nil
+            : ScanNode.buildTree(rootPath: rootPathStr, dirFiles: localDirFiles, dirSizes: localDirSizes)
         await MainActor.run {
             self.scanFileCount = finalCount
             self.scanTotalBytes = finalBytes
             self.permissionDeniedCount = deniedCounter.count
             self.dirSizes = finalDirSizes
             self.dirSizesVersion += 1
+            if let tree {
+                self.fullTree = tree
+                self.fullTreeVersion += 1
+            }
             self.scanning = false
         }
+    }
+
+    // MARK: - Full tree helpers
+
+    /// Resolve the ScanNode for `dir` by walking the full tree from the scan root.
+    func fullTreeNode(for dir: URL) -> ScanNode? {
+        guard let tree = fullTree, let root = rootPath else { return nil }
+        if dir.path == root.path { return tree }
+        let rootComponents = root.pathComponents
+        let dirComponents = dir.pathComponents
+        guard dirComponents.count > rootComponents.count,
+              Array(dirComponents.prefix(rootComponents.count)) == rootComponents
+        else { return nil }
+        var node = tree
+        for name in dirComponents.dropFirst(rootComponents.count) {
+            guard let next = node.dirs.first(where: { $0.name == name }) else { return nil }
+            node = next
+        }
+        return node
+    }
+
+    /// Size of any scanned path: directories from dirSizes, files from the full tree.
+    func sizeOfScannedPath(_ path: String) -> UInt64? {
+        if let dirSize = dirSizes[path] { return dirSize }
+        let url = URL(fileURLWithPath: path)
+        guard let parent = fullTreeNode(for: url.deletingLastPathComponent()) else { return nil }
+        let name = url.lastPathComponent
+        return parent.files.first(where: { $0.name == name })?.size
     }
 
     // MARK: - Folder browsing helpers
