@@ -1,6 +1,6 @@
 # Changelog
 
-# v1.3.0 (unreleased)
+# v1.3.0
 ## What's New
 ### GrandPerspective-style grouped treemap
 - **Mac app**: Folders mode now renders a full hierarchical treemap of *every* scanned file — cushion-shaded blocks grouped inside their parent folder's rectangle, colored by top-level folder, with thin folder borders and labels on larger regions. Click selects (path + size in the header, Reveal in Finder), double-click descends, hover previews the path. Falls back to the flat treemap while the full map is being built during a scan.
